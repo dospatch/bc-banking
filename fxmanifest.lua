@@ -29,7 +29,8 @@ server_scripts {
     'server/accounts.lua',
     'server/transactions.lua',
     'server/players.lua',
-    'server/transfers.lua'
+    'server/transfers.lua',
+    'server/banking.lua'
 }
 
 ui_page 'html/index.html'
