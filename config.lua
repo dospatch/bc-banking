@@ -1,98 +1,121 @@
 Config = {}
 
--- General
 Config.Debug = false
-Config.Framework = 'qbcore'
-Config.Currency = '$'
 
--- Commands
-Config.OpenCommand = 'bank'
+Config.BankCommand = 'bank'
 Config.ATMCommand = 'atm'
 
--- Target
-Config.UseTarget = true
-Config.TargetResource = 'ox_target'
+Config.Currency = '$'
 
--- Interaction distances
-Config.BankOpeningDistance = 2.0
-Config.ATMOpeningDistance = 1.5
+Config.AccountNumberLength = 10
 
--- Transaction history
+Config.StartingBankBalance = 0
+
+Config.MaxDeposit = 1000000
+Config.MaxWithdrawal = 1000000
+Config.MaxTransfer = 1000000
+
+Config.TransferFee = 0
+
 Config.TransactionHistoryLimit = 50
 
--- Transfers
-Config.Transfer = {
-    Enabled = true,
-    Minimum = 1,
-    Maximum = 100000,
-    Fee = 0
-}
-
--- Deposits
-Config.Deposit = {
-    Minimum = 1,
-    Maximum = 1000000
-}
-
--- Withdrawals
-Config.Withdraw = {
-    Minimum = 1,
-    Maximum = 100000
-}
-
--- Bank locations
 Config.BankLocations = {
-    {
-        name = 'Legion Square',
-        coords = vector3(149.94, -1040.82, 29.37)
-    },
-    {
-        name = 'Hawick',
-        coords = vector3(314.19, -278.62, 54.17)
-    },
-    {
-        name = 'Rockford Hills',
-        coords = vector3(-1212.98, -330.84, 37.78)
-    },
-    {
-        name = 'Alta',
-        coords = vector3(-2962.58, 482.63, 15.70)
-    },
-    {
-        name = 'Great Ocean Highway',
-        coords = vector3(-111.17, 6470.07, 31.63)
-    }
+    vector3(149.55, -1040.7, 29.37),
+    vector3(-1212.98, -330.84, 37.78),
+    vector3(-2962.58, 482.63, 15.7),
+    vector3(-112.2, 6469.8, 31.63),
+    vector3(314.19, -278.62, 54.17),
+    vector3(-351.0, -49.0, 49.04),
+    vector3(1175.0, 2706.8, 38.09)
 }
 
--- ATM models
-Config.ATMModels = {
-    'prop_atm_01',
-    'prop_atm_02',
-    'prop_atm_03',
-    'prop_fleeca_atm'
-}
-
--- Bank blip
-Config.Blip = {
-    sprite = 108,
-    color = 2,
-    scale = 0.75,
-    name = 'Bank'
-}
-
--- Messages
-Config.Messages = {
-    NoMoney = 'You do not have enough money.',
-    InvalidAmount = 'Invalid amount.',
-    DepositSuccess = 'Deposit completed.',
-    WithdrawSuccess = 'Withdrawal completed.',
-    TransferSuccess = 'Transfer completed.',
-    TransferFailed = 'Transfer failed.',
-    SamePlayer = 'You cannot transfer money to yourself.',
-    TargetNotFound = 'The recipient is not online.',
-    TransferDisabled = 'Transfers are disabled.',
-    TooMuch = 'The amount exceeds the allowed limit.',
-    TooLittle = 'The amount is below the allowed minimum.',
-    BankOnly = 'You must be at a bank.',
-    ATMOnly = 'You must be at an ATM.'
+Config.ATMLocations = {
+    vector3(89.75, 2.35, 68.31),
+    vector3(-386.733, 6045.953, 31.501),
+    vector3(-284.037, 6224.385, 31.187),
+    vector3(-284.037, 6224.385, 31.187),
+    vector3(-135.165, 6365.738, 28.995),
+    vector3(-110.753, 6467.703, 31.784),
+    vector3(-94.969, 6455.301, 31.784),
+    vector3(155.430, 6641.991, 31.784),
+    vector3(174.672, 6637.218, 31.784),
+    vector3(1703.138, 6426.783, 32.730),
+    vector3(1735.114, 6411.035, 35.164),
+    vector3(1702.842, 4933.593, 42.051),
+    vector3(1967.333, 3744.293, 32.272),
+    vector3(1171.523, 2702.483, 38.175),
+    vector3(2564.399, 2585.100, 38.016),
+    vector3(2558.683, 349.601, 108.050),
+    vector3(2558.051, 389.481, 108.660),
+    vector3(1077.692, -775.796, 58.218),
+    vector3(1139.018, -469.886, 66.789),
+    vector3(1168.975, -457.241, 66.641),
+    vector3(1153.884, -326.540, 69.205),
+    vector3(381.282, 323.251, 103.270),
+    vector3(236.463, 217.471, 106.840),
+    vector3(265.004, 212.171, 106.780),
+    vector3(-164.568, 233.506, 94.919),
+    vector3(-1827.04, 785.515, 138.020),
+    vector3(-1409.39, -99.260, 52.473),
+    vector3(-1205.35, -325.774, 37.870),
+    vector3(-1215.64, -332.231, 37.780),
+    vector3(-2072.41, -316.959, 13.345),
+    vector3(-2975.72, 379.773, 14.992),
+    vector3(-2962.60, 482.191, 15.762),
+    vector3(-2955.70, 488.721, 15.486),
+    vector3(-3044.22, 595.242, 7.595),
+    vector3(-3144.39, 1127.68, 20.868),
+    vector3(-3241.17, 996.688, 12.830),
+    vector3(-3241.10, 1009.15, 12.877),
+    vector3(-1305.40, -706.240, 25.352),
+    vector3(-538.225, -854.423, 29.651),
+    vector3(-711.156, -818.958, 23.768),
+    vector3(-717.614, -915.880, 17.692),
+    vector3(-526.566, -1222.90, 18.434),
+    vector3(-256.831, -719.849, 33.444),
+    vector3(-203.548, -861.588, 30.260),
+    vector3(112.410, -776.162, 31.427),
+    vector3(112.929, -818.711, 31.386),
+    vector3(119.900, -883.826, 31.123),
+    vector3(-846.304, -340.402, 38.687),
+    vector3(-1204.35, -324.391, 37.877),
+    vector3(-1216.27, -331.461, 37.773),
+    vector3(-56.1935, -1752.53, 29.421),
+    vector3(-261.692, -2012.64, 30.121),
+    vector3(-273.001, -2025.60, 30.197),
+    vector3(-284.012, -2026.01, 30.197),
+    vector3(-284.012, -2026.01, 30.197),
+    vector3(5.134, -919.949, 29.557),
+    vector3(126.975, -1296.10, 29.269),
+    vector3(289.012, -1256.54, 29.440),
+    vector3(288.773, -1282.29, 29.633),
+    vector3(-1391.83, -590.13, 30.319),
+    vector3(-1430.11, -211.01, 46.500),
+    vector3(-1415.93, -211.04, 46.500),
+    vector3(-2956.87, 487.90, 15.46),
+    vector3(-3043.94, 594.56, 7.73),
+    vector3(-3240.64, 1008.48, 12.83),
+    vector3(-3240.64, 1008.48, 12.83),
+    vector3(-3144.39, 1127.68, 20.87),
+    vector3(-1305.40, -706.24, 25.35),
+    vector3(-538.23, -854.42, 29.65),
+    vector3(-717.61, -915.88, 17.69),
+    vector3(-821.18, -1081.99, 11.13),
+    vector3(-1110.25, -1690.78, 4.38),
+    vector3(-1022.50, -2704.52, 13.76),
+    vector3(-450.16, -852.87, 31.04),
+    vector3(314.23, -278.87, 54.17),
+    vector3(-302.41, -829.86, 32.42),
+    vector3(-258.80, -723.32, 33.48),
+    vector3(24.59, -946.05, 29.36),
+    vector3(-617.65, -704.09, 31.24),
+    vector3(-609.09, -705.25, 31.24),
+    vector3(-866.64, -187.95, 37.84),
+    vector3(-867.61, -187.76, 37.84),
+    vector3(-721.13, -415.58, 34.98),
+    vector3(-721.05, -416.08, 34.98),
+    vector3(-712.89, -818.99, 23.73),
+    vector3(-710.08, -818.93, 23.73),
+    vector3(-660.71, -854.07, 24.48),
+    vector3(-660.72, -853.93, 24.48)
 }

@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>BC-Banking</title>
+
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+    <div id="app" class="hidden">
+        <div class="bank-container">
+
+            <header class="topbar">
+                <div>
+                    <div class="brand">BC<span>-</span>BANKING</div>
+                    <div class="subtitle">Secure Banking System</div>
+                </div>
+
+                <button id="closeButton" class="close-button">
+                    ×
+                </button>
+            </header>
+
+            <main>
+
+                <section class="welcome">
+                    <div>
+                        <p class="muted">Welcome back</p>
+                        <h1 id="playerName">Citizen</h1>
+                    </div>
+
+                    <div class="account-number">
+                        <span>ACCOUNT</span>
+                        <strong id="accountNumber">----------</strong>
+                    </div>
+                </section>
+
+                <section class="balance-grid">
+
+                    <div class="balance-card cash">
+                        <span>Cash</span>
+                        <strong id="cashBalance">$0.00</strong>
+                    </div>
+
+                    <div class="balance-card bank">
+                        <span>Bank Balance</span>
+                        <strong id="bankBalance">$0.00</strong>
+                    </div>
+
+                    <div class="balance-card total">
+                        <span>Total Funds</span>
+                        <strong id="totalBalance">$0.00</strong>
+                    </div>
+
+                </section>
+
+                <section class="actions">
+
+                    <div class="panel">
+                        <h2>Deposit</h2>
+                        <p>Move cash into your bank account.</p>
+
+                        <input
+                            id="depositAmount"
+                            type="number"
+                            min="1"
+                            placeholder="Amount"
+                        >
+
+                        <button id="depositButton">
+                            Deposit Funds
+                        </button>
+                    </div>
+
+                    <div class="panel">
+                        <h2>Withdraw</h2>
+                        <p>Withdraw money from your bank account.</p>
+
+                        <input
+                            id="withdrawAmount"
+                            type="number"
+                            min="1"
+                            placeholder="Amount"
+                        >
+
+                        <button id="withdrawButton">
+                            Withdraw Funds
+                        </button>
+                    </div>
+
+                    <div class="panel transfer-panel">
+                        <h2>Transfer</h2>
+                        <p>Send funds to another bank account.</p>
+
+                        <input
+                            id="transferAccount"
+                            type="text"
+                            maxlength="20"
+                            placeholder="Recipient Account Number"
+                        >
+
+                        <input
+                            id="transferAmount"
+                            type="number"
+                            min="1"
+                            placeholder="Amount"
+                        >
+
+                        <input
+                            id="transferDescription"
+                            type="text"
+                            maxlength="100"
+                            placeholder="Description"
+                        >
+
+                        <button id="transferButton">
+                            Send Transfer
+                        </button>
+                    </div>
+
+                </section>
+
+                <section class="transactions">
+
+                    <div class="section-header">
+                        <div>
+                            <h2>Recent Transactions</h2>
+                            <p>Your latest banking activity</p>
+                        </div>
+
+                        <button id="refreshButton">
+                            Refresh
+                        </button>
+                    </div>
+
+                    <div id="transactionList" class="transaction-list">
+                        <div class="empty">
+                            No transactions found.
+                        </div>
+                    </div>
+
+                </section>
+
+            </main>
+
+            <footer>
+                <span>BCGAMING</span>
+                <span>BC-Banking v1.0.0</span>
+            </footer>
+
+        </div>
+    </div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>

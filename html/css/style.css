@@ -1,0 +1,298 @@
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    font-family: Arial, Helvetica, sans-serif;
+}
+
+body {
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    background: transparent;
+    color: #ffffff;
+}
+
+.hidden {
+    display: none !important;
+}
+
+#app {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.65);
+}
+
+.bank-container {
+    width: min(1150px, 92vw);
+    max-height: 92vh;
+    overflow-y: auto;
+    background: #0b0f16;
+    border: 1px solid #273142;
+    border-radius: 18px;
+    box-shadow: 0 25px 80px rgba(0, 0, 0, 0.65);
+}
+
+.topbar {
+    padding: 24px 28px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #273142;
+}
+
+.brand {
+    font-size: 27px;
+    font-weight: 900;
+    letter-spacing: 2px;
+}
+
+.brand span {
+    color: #4da3ff;
+}
+
+.subtitle {
+    margin-top: 4px;
+    color: #8793a6;
+    font-size: 13px;
+}
+
+.close-button {
+    width: 40px;
+    height: 40px;
+    border: 0;
+    border-radius: 10px;
+    background: #18202d;
+    color: #ffffff;
+    font-size: 25px;
+    cursor: pointer;
+}
+
+.close-button:hover {
+    background: #242e3e;
+}
+
+main {
+    padding: 28px;
+}
+
+.welcome {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+}
+
+.muted {
+    color: #8793a6;
+    font-size: 14px;
+}
+
+h1 {
+    margin-top: 5px;
+    font-size: 31px;
+}
+
+.account-number {
+    text-align: right;
+}
+
+.account-number span {
+    display: block;
+    color: #8793a6;
+    font-size: 11px;
+    letter-spacing: 1px;
+}
+
+.account-number strong {
+    font-size: 17px;
+    letter-spacing: 2px;
+}
+
+.balance-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.balance-card {
+    padding: 22px;
+    border-radius: 14px;
+    background: #111823;
+    border: 1px solid #273142;
+}
+
+.balance-card span {
+    color: #8793a6;
+    font-size: 13px;
+}
+
+.balance-card strong {
+    display: block;
+    margin-top: 10px;
+    font-size: 27px;
+}
+
+.actions {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+}
+
+.panel {
+    padding: 20px;
+    border-radius: 14px;
+    background: #111823;
+    border: 1px solid #273142;
+}
+
+.panel h2 {
+    font-size: 18px;
+}
+
+.panel p {
+    color: #8793a6;
+    font-size: 12px;
+    margin: 7px 0 15px;
+    min-height: 30px;
+}
+
+input {
+    width: 100%;
+    padding: 13px;
+    margin-bottom: 10px;
+    border-radius: 9px;
+    border: 1px solid #2b3748;
+    background: #080c12;
+    color: #ffffff;
+    outline: none;
+}
+
+input:focus {
+    border-color: #4da3ff;
+}
+
+button {
+    border: 0;
+    cursor: pointer;
+}
+
+.panel button {
+    width: 100%;
+    padding: 13px;
+    border-radius: 9px;
+    background: #4da3ff;
+    color: #ffffff;
+    font-weight: 700;
+}
+
+.panel button:hover {
+    filter: brightness(1.1);
+}
+
+.transactions {
+    margin-top: 25px;
+    padding: 20px;
+    border-radius: 14px;
+    background: #111823;
+    border: 1px solid #273142;
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.section-header h2 {
+    font-size: 19px;
+}
+
+.section-header p {
+    color: #8793a6;
+    font-size: 12px;
+    margin-top: 4px;
+}
+
+#refreshButton {
+    padding: 9px 14px;
+    border-radius: 8px;
+    background: #18202d;
+    color: #ffffff;
+}
+
+.transaction-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.transaction {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 13px;
+    border-radius: 9px;
+    background: #0b1018;
+}
+
+.transaction-info strong {
+    display: block;
+    font-size: 13px;
+}
+
+.transaction-info span {
+    display: block;
+    margin-top: 4px;
+    color: #768398;
+    font-size: 11px;
+}
+
+.transaction-amount {
+    font-weight: 800;
+}
+
+.income {
+    color: #4ade80;
+}
+
+.expense {
+    color: #f87171;
+}
+
+.empty {
+    padding: 25px;
+    text-align: center;
+    color: #6f7b8e;
+}
+
+footer {
+    padding: 15px 28px;
+    display: flex;
+    justify-content: space-between;
+    color: #596578;
+    font-size: 10px;
+    border-top: 1px solid #273142;
+}
+
+@media (max-width: 900px) {
+    .balance-grid,
+    .actions {
+        grid-template-columns: 1fr;
+    }
+
+    .welcome {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 15px;
+    }
+
+    .account-number {
+        text-align: left;
+    }
+}
