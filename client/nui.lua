@@ -1,3 +1,5 @@
+local QBCore = exports['qb-core']:GetCoreObject()
+
 RegisterNUICallback('close', function(_, cb)
     SetNuiFocus(false, false)
     cb('ok')
