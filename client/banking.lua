@@ -1,3 +1,5 @@
+local QBCore = exports['qb-core']:GetCoreObject()
+
 RegisterNetEvent('bc-banking:client:open', function()
     QBCore.Functions.TriggerCallback(
         'bc-banking:server:getDashboard',
