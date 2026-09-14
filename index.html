@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BC Banking</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <main id="app" class="hidden">
+        <section class="bank-window">
+            <header class="topbar">
+                <div class="brand">
+                    <div class="brand-mark">BC</div>
+                    <div>
+                        <h1>BC BANKING</h1>
+                        <span>BCGAMING SAN ANDREAS ROLEPLAY</span>
+                    </div>
+                </div>
+                <button id="close" class="icon-btn" aria-label="Close">×</button>
+            </header>
+
+            <section class="hero">
+                <div>
+                    <p class="eyebrow">AVAILABLE BALANCE</p>
+                    <h2 id="balance">$0</h2>
+                    <p id="account">Account: —</p>
+                </div>
+                <div class="cash-card">
+                    <span>CASH</span>
+                    <strong id="cash">$0</strong>
+                </div>
+            </section>
+
+            <section class="content-grid">
+                <div class="card actions-card">
+                    <div class="card-title"><span>Quick Actions</span><button id="refresh" class="small-btn">Refresh</button></div>
+                    <div class="forms">
+                        <form id="depositForm">
+                            <h3>Deposit Cash</h3>
+                            <input id="depositAmount" type="number" min="1" step="1" placeholder="Amount" required>
+                            <button type="submit">Deposit</button>
+                        </form>
+                        <form id="withdrawForm">
+                            <h3>Withdraw Cash</h3>
+                            <input id="withdrawAmount" type="number" min="1" step="1" placeholder="Amount" required>
+                            <button type="submit">Withdraw</button>
+                        </form>
+                        <form id="transferForm" class="transfer-form">
+                            <h3>Transfer Money</h3>
+                            <input id="target" type="number" min="1" step="1" placeholder="Recipient Server ID" required>
+                            <input id="transferAmount" type="number" min="1" step="1" placeholder="Amount" required>
+                            <input id="note" type="text" maxlength="100" placeholder="Note (optional)">
+                            <button type="submit">Send Transfer</button>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="card profile-card">
+                    <p class="eyebrow">ACCOUNT HOLDER</p>
+                    <h3 id="name">Citizen</h3>
+                    <p id="job">Citizen</p>
+                    <div class="details">
+                        <span>Citizen ID</span><strong id="citizenid">—</strong>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card history-card">
+                <div class="card-title"><span>Transaction History</span><span id="count">0 transactions</span></div>
+                <div id="transactions" class="transactions"></div>
+            </section>
+        </section>
+    </main>
+    <script src="js/app.js"></script>
+</body>
+</html>
