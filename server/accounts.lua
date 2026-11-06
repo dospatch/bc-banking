@@ -46,6 +46,12 @@ exports('CreateAccount', function(Player)
     )
 
     if existing then
+        local currentBank = tonumber(Player.PlayerData.money.bank) or 0
+        MySQL.update.await(
+            'UPDATE bc_banking_accounts SET balance = ? WHERE citizenid = ?',
+            { currentBank, citizenid }
+        )
+        existing.balance = currentBank
         return existing
     end
 
