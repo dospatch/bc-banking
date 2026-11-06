@@ -13,9 +13,7 @@ body {
     color: #ffffff;
 }
 
-.hidden {
-    display: none !important;
-}
+.hidden { display: none !important; }
 
 #app {
     width: 100%;
@@ -23,17 +21,17 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(0, 0, 0, 0.65);
+    background: rgba(0, 0, 0, 0.68);
 }
 
 .bank-container {
     width: min(1150px, 92vw);
     max-height: 92vh;
     overflow-y: auto;
-    background: #0b0f16;
-    border: 1px solid #273142;
+    background: #090d14;
+    border: 1px solid #303b4b;
     border-radius: 18px;
-    box-shadow: 0 25px 80px rgba(0, 0, 0, 0.65);
+    box-shadow: 0 25px 80px rgba(0, 0, 0, 0.68);
 }
 
 .topbar {
@@ -41,7 +39,8 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    border-bottom: 1px solid #273142;
+    border-bottom: 1px solid #263243;
+    background: linear-gradient(100deg, #111a25, #0b111a);
 }
 
 .brand {
@@ -50,34 +49,24 @@ body {
     letter-spacing: 2px;
 }
 
-.brand span {
-    color: #4da3ff;
-}
+.brand span { color: #f28a24; }
 
-.subtitle {
-    margin-top: 4px;
-    color: #8793a6;
-    font-size: 13px;
-}
+.subtitle { margin-top: 4px; color: #8793a6; font-size: 13px; }
 
 .close-button {
     width: 40px;
     height: 40px;
     border: 0;
     border-radius: 10px;
-    background: #18202d;
+    background: #1a2532;
     color: #ffffff;
     font-size: 25px;
     cursor: pointer;
 }
 
-.close-button:hover {
-    background: #242e3e;
-}
+.close-button:hover { background: #2a3544; }
 
-main {
-    padding: 28px;
-}
+main { padding: 28px; }
 
 .welcome {
     display: flex;
@@ -86,31 +75,17 @@ main {
     margin-bottom: 24px;
 }
 
-.muted {
-    color: #8793a6;
-    font-size: 14px;
-}
+.muted { color: #8793a6; font-size: 14px; }
+h1 { margin-top: 5px; font-size: 31px; }
 
-h1 {
-    margin-top: 5px;
-    font-size: 31px;
-}
-
-.account-number {
-    text-align: right;
-}
-
+.account-number { text-align: right; }
 .account-number span {
     display: block;
     color: #8793a6;
     font-size: 11px;
     letter-spacing: 1px;
 }
-
-.account-number strong {
-    font-size: 17px;
-    letter-spacing: 2px;
-}
+.account-number strong { font-size: 17px; letter-spacing: 2px; }
 
 .balance-grid {
     display: grid;
@@ -122,20 +97,17 @@ h1 {
 .balance-card {
     padding: 22px;
     border-radius: 14px;
-    background: #111823;
-    border: 1px solid #273142;
+    background: #111a25;
+    border: 1px solid #2a3748;
 }
 
-.balance-card span {
-    color: #8793a6;
-    font-size: 13px;
+.balance-card.bank {
+    background: linear-gradient(135deg, #302316, #171b22);
+    border-color: #67421f;
 }
 
-.balance-card strong {
-    display: block;
-    margin-top: 10px;
-    font-size: 27px;
-}
+.balance-card span { color: #a0adbd; font-size: 13px; }
+.balance-card strong { display: block; margin-top: 10px; font-size: 27px; }
 
 .actions {
     display: grid;
@@ -146,60 +118,44 @@ h1 {
 .panel {
     padding: 20px;
     border-radius: 14px;
-    background: #111823;
-    border: 1px solid #273142;
+    background: #111a25;
+    border: 1px solid #2a3748;
 }
 
-.panel h2 {
-    font-size: 18px;
-}
-
-.panel p {
-    color: #8793a6;
-    font-size: 12px;
-    margin: 7px 0 15px;
-    min-height: 30px;
-}
+.panel h2 { font-size: 18px; }
+.panel p { color: #8793a6; font-size: 12px; margin: 7px 0 15px; min-height: 30px; }
 
 input {
     width: 100%;
     padding: 13px;
     margin-bottom: 10px;
     border-radius: 9px;
-    border: 1px solid #2b3748;
-    background: #080c12;
+    border: 1px solid #2b394a;
+    background: #080d14;
     color: #ffffff;
     outline: none;
 }
 
-input:focus {
-    border-color: #4da3ff;
-}
-
-button {
-    border: 0;
-    cursor: pointer;
-}
+input:focus { border-color: #f28a24; }
+button { border: 0; cursor: pointer; }
 
 .panel button {
     width: 100%;
     padding: 13px;
     border-radius: 9px;
-    background: #4da3ff;
-    color: #ffffff;
-    font-weight: 700;
+    background: #f28a24;
+    color: #17110b;
+    font-weight: 800;
 }
 
-.panel button:hover {
-    filter: brightness(1.1);
-}
+.panel button:hover { background: #ff9e3d; }
 
 .transactions {
     margin-top: 25px;
     padding: 20px;
     border-radius: 14px;
-    background: #111823;
-    border: 1px solid #273142;
+    background: #111a25;
+    border: 1px solid #2a3748;
 }
 
 .section-header {
@@ -209,28 +165,17 @@ button {
     margin-bottom: 15px;
 }
 
-.section-header h2 {
-    font-size: 19px;
-}
-
-.section-header p {
-    color: #8793a6;
-    font-size: 12px;
-    margin-top: 4px;
-}
+.section-header h2 { font-size: 19px; }
+.section-header p { color: #8793a6; font-size: 12px; margin-top: 4px; }
 
 #refreshButton {
     padding: 9px 14px;
     border-radius: 8px;
-    background: #18202d;
+    background: #263344;
     color: #ffffff;
 }
 
-.transaction-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
+.transaction-list { display: flex; flex-direction: column; gap: 8px; }
 
 .transaction {
     display: flex;
@@ -238,61 +183,29 @@ button {
     align-items: center;
     padding: 13px;
     border-radius: 9px;
-    background: #0b1018;
+    background: #0b111a;
 }
 
-.transaction-info strong {
-    display: block;
-    font-size: 13px;
-}
-
-.transaction-info span {
-    display: block;
-    margin-top: 4px;
-    color: #768398;
-    font-size: 11px;
-}
-
-.transaction-amount {
-    font-weight: 800;
-}
-
-.income {
-    color: #4ade80;
-}
-
-.expense {
-    color: #f87171;
-}
-
-.empty {
-    padding: 25px;
-    text-align: center;
-    color: #6f7b8e;
-}
+.transaction-info strong { display: block; font-size: 13px; }
+.transaction-info span { display: block; margin-top: 4px; color: #8793a6; font-size: 11px; }
+.transaction-amount { font-weight: 800; }
+.income { color: #49c58a; }
+.expense { color: #f08b78; }
+.empty { padding: 25px; text-align: center; color: #6f7b8e; }
 
 footer {
     padding: 15px 28px;
     display: flex;
     justify-content: space-between;
-    color: #596578;
+    color: #718096;
     font-size: 10px;
-    border-top: 1px solid #273142;
+    border-top: 1px solid #263243;
 }
 
+footer span:first-child { color: #f28a24; font-weight: 800; }
+
 @media (max-width: 900px) {
-    .balance-grid,
-    .actions {
-        grid-template-columns: 1fr;
-    }
-
-    .welcome {
-        align-items: flex-start;
-        flex-direction: column;
-        gap: 15px;
-    }
-
-    .account-number {
-        text-align: left;
-    }
+    .balance-grid, .actions { grid-template-columns: 1fr; }
+    .welcome { align-items: flex-start; flex-direction: column; gap: 15px; }
+    .account-number { text-align: left; }
 }
