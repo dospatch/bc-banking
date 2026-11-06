@@ -73,6 +73,7 @@ Built for **QBCore** with **oxmysql**, BC-Banking is designed to be simple to in
 * Self-transfer protection
 * Insufficient-balance protection
 * QBCore server-side money handling
+* QBCore bank balance is authoritative; the BC-Banking account balance column is synchronized as a mirror
 * Per-character operation locks to serialize simultaneous requests
 * Request cooldown to reduce rapid duplicate submissions
 * Money-removal and credit-result checks with compensating refunds on failed credits
@@ -459,7 +460,7 @@ Controls the length of generated account numbers.
 Config.StartingBankBalance = 0
 ```
 
-Controls the starting BC-Banking account balance.
+Legacy setting retained for configuration compatibility. V1.0 uses the player's QBCore bank balance as the authoritative balance and initializes/synchronizes the account mirror from it.
 
 ---
 
@@ -559,7 +560,7 @@ The resource uses QBCore for:
 * Server-side money operations
 * Player loading
 
-Bank and ATM interactions are handled by `ox_target`. The resource uses QBCore cash and bank money accounts as its authoritative balances; `ox_inventory` can run alongside it without creating a second cash balance. If your server has a custom inventory-item cash setup, that requires a dedicated money adapter.
+Bank and ATM interactions are handled by `ox_target`. The resource uses QBCore cash and bank money accounts as its authoritative balances. The `bc_banking_accounts.balance` column is a synchronized mirror, not a separate wallet. `ox_inventory` can run alongside it without creating a second cash balance. If your server has a custom inventory-item cash setup, that requires a dedicated money adapter.
 
 BC-Banking initializes QBCore through:
 
