@@ -119,3 +119,20 @@ Config.ATMLocations = {
     vector3(-660.71, -854.07, 24.48),
     vector3(-660.72, -853.93, 24.48)
 }
+
+-- ox_target interaction settings.
+Config.Target = {
+    BankDistance = 2.0,
+    ATMDistance = 1.5,
+    BankSize = vec3(3.0, 2.0, 2.0),
+    BankIcon = 'fa-solid fa-building-columns',
+    ATMIcon = 'fa-solid fa-money-bill-transfer'
+}
+
+-- Standard GTA V ATM props. ox_target attaches the interaction to these models.
+Config.ATMModels = {
+    'prop_atm_01',
+    'prop_atm_02',
+    'prop_atm_03',
+    'prop_fleeca_atm'
+}
