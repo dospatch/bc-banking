@@ -1,109 +1,93 @@
 local QBCore = exports['qb-core']:GetCoreObject()
-
-RegisterNetEvent('bc-banking:server:transfer', function(targetAccountNumber, amount, description)
-    local source = source
-    local Player = QBCore.Functions.GetPlayer(source)
-
-    if not Player then
-        return
-    end
-
-    targetAccountNumber = BCBanking.Trim(targetAccountNumber)
-    amount = tonumber(amount)
-    description = BCBanking.Trim(description)
-
-    if not amount or amount <= 0 then
-        TriggerClientEvent('bc-banking:client:notify', source, 'Invalid transfer amount.', 'error')
-        return
-    end
-
+local function notify(src, msg, kind) TriggerClientEvent('bc-banking:client:notify', src, msg, kind or 'error') end
+local function validAmount(value)
+    local amount = tonumber(value)
+    if not amount or amount ~= amount or amount == math.huge or amount == -math.huge then return nil end
     amount = BCBanking.RoundMoney(amount)
+    if amount <= 0 or amount > Config.MaxTransfer then return nil end
+    return amount
+end
 
-    if amount > Config.MaxTransfer then
-        TriggerClientEvent('bc-banking:client:notify', source, 'Transfer exceeds the maximum allowed amount.', 'error')
+RegisterNetEvent('bc-banking:server:transfer', function(targetAccountNumber, value, description)
+    local src = source
+    local initial = QBCore.Functions.GetPlayer(src)
+    if not initial then return end
+    local senderCid = initial.PlayerData.citizenid
+    targetAccountNumber = BCBanking.Trim(targetAccountNumber)
+    description = BCBanking.Trim(description)
+    local amount = validAmount(value)
+    local fee = tonumber(Config.TransferFee) or 0
+
+    if not amount then notify(src, 'Enter a valid transfer amount within the transaction limit.') return end
+    if fee < 0 or fee ~= fee or fee == math.huge then
+        notify(src, 'Bank transfer fees are configured incorrectly. Contact staff.')
+        print('[bc-banking] Config.TransferFee must be finite and non-negative.')
         return
     end
-
-    if targetAccountNumber == '' then
-        TriggerClientEvent('bc-banking:client:notify', source, 'Enter a valid account number.', 'error')
-        return
+    fee = BCBanking.RoundMoney(fee)
+    if targetAccountNumber == '' or not targetAccountNumber:match('^%d+$') then
+        notify(src, 'Enter a valid destination account number.') return
     end
 
-    local senderCitizenId = Player.PlayerData.citizenid
-
-    local senderAccount = exports['bc-banking']:GetAccountByCitizenId(senderCitizenId)
+    local senderAccount = exports['bc-banking']:GetAccountByCitizenId(senderCid)
+    if not senderAccount then senderAccount = exports['bc-banking']:CreateAccount(initial) end
     local receiverAccount = exports['bc-banking']:GetAccountByNumber(targetAccountNumber)
+    if not senderAccount or not receiverAccount then notify(src, 'The destination account was not found.') return end
+    if receiverAccount.citizenid == senderCid then notify(src, 'You cannot transfer money to yourself.') return end
 
-    if not senderAccount then
-        senderAccount = exports['bc-banking']:CreateAccount(Player)
-    end
+    local ok, message = BCBanking.WithPlayerLocks({ senderCid, receiverAccount.citizenid }, function()
+        local Sender = QBCore.Functions.GetPlayer(src)
+        if not Sender or Sender.PlayerData.citizenid ~= senderCid then return false, 'Your banking session is no longer available.' end
+        local currentAccount = exports['bc-banking']:GetAccountByNumber(targetAccountNumber)
+        if not currentAccount or currentAccount.citizenid ~= receiverAccount.citizenid then
+            return false, 'The destination account is no longer available.'
+        end
 
-    if not receiverAccount then
-        TriggerClientEvent('bc-banking:client:notify', source, 'The destination account was not found.', 'error')
-        return
-    end
+        local total = amount + fee
+        if (tonumber(Sender.PlayerData.money.bank) or 0) < total then
+            return false, 'Insufficient bank funds, including the transfer fee.'
+        end
+        if Sender.Functions.RemoveMoney('bank', total, 'bc-banking-transfer') ~= true then
+            return false, 'Your bank funds could not be removed. Transfer cancelled.'
+        end
 
-    if receiverAccount.citizenid == senderCitizenId then
-        TriggerClientEvent('bc-banking:client:notify', source, 'You cannot transfer money to yourself.', 'error')
-        return
-    end
+        local Receiver = QBCore.Functions.GetPlayerByCitizenId(receiverAccount.citizenid)
+        local credited = false
+        if Receiver then
+            credited = Receiver.Functions.AddMoney('bank', amount, 'bc-banking-transfer') == true
+        else
+            local affected = MySQL.update.await([[
+                UPDATE players
+                SET money = JSON_SET(
+                    money,
+                    '$.bank',
+                    CAST(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(money, '$.bank')), '0') AS DECIMAL(15,2)) + ?
+                )
+                WHERE citizenid = ?
+            ]], { amount, receiverAccount.citizenid })
+            credited = (tonumber(affected) or 0) > 0
+        end
 
-    local senderBank = tonumber(Player.PlayerData.money.bank) or 0
+        if not credited then
+            local refunded = Sender.Functions.AddMoney('bank', total, 'bc-banking-transfer-refund') == true
+            if not refunded then
+                print(('[bc-banking] CRITICAL: recipient credit and sender refund failed. Sender=%s Receiver=%s Amount=%.2f'):format(senderCid, receiverAccount.citizenid, total))
+                return false, 'Transfer failed and refund could not be confirmed. Contact staff immediately.'
+            end
+            return false, 'The recipient could not be credited. Your money was refunded.'
+        end
 
-    local total = amount + Config.TransferFee
-
-    if senderBank < total then
-        TriggerClientEvent('bc-banking:client:notify', source, 'Insufficient bank funds.', 'error')
-        return
-    end
-
-    local Receiver = QBCore.Functions.GetPlayerByCitizenId(receiverAccount.citizenid)
-
-    Player.Functions.RemoveMoney(
-        'bank',
-        total,
-        'bc-banking-transfer'
-    )
-
-    if Receiver then
-        Receiver.Functions.AddMoney(
-            'bank',
-            amount,
-            'bc-banking-transfer'
-        )
-    else
-        MySQL.update.await(
-            'UPDATE players SET money = JSON_SET(money, "$.bank", JSON_EXTRACT(money, "$.bank") + ?) WHERE citizenid = ?',
-            {
-                amount,
-                receiverAccount.citizenid
-            }
-        )
-    end
-
-    local senderDescription =
-        description ~= '' and description or 'Bank transfer sent'
-
-    exports['bc-banking']:AddTransaction(
-        senderCitizenId,
-        'transfer_out',
-        amount,
-        senderDescription,
-        receiverAccount.account_number
-    )
-
-    exports['bc-banking']:AddTransaction(
-        receiverAccount.citizenid,
-        'transfer_in',
-        amount,
-        'Bank transfer received',
-        senderAccount.account_number
-    )
-
-    TriggerClientEvent(
-        'bc-banking:client:notify',
-        source,
-        'Transfer completed successfully.',
-        'success'
-    )
+        local senderText = description ~= '' and description or 'Bank transfer sent'
+        local outOk, outId = pcall(function()
+            return exports['bc-banking']:AddTransaction(senderCid, 'transfer_out', amount, senderText, receiverAccount.account_number)
+        end)
+        local inOk, inId = pcall(function()
+            return exports['bc-banking']:AddTransaction(receiverAccount.citizenid, 'transfer_in', amount, 'Bank transfer received', senderAccount.account_number)
+        end)
+        if not outOk or not outId or not inOk or not inId then
+            print(('[bc-banking] Transfer completed but transaction log insert failed. Sender=%s Receiver=%s'):format(senderCid, receiverAccount.citizenid))
+        end
+        return true, 'Transfer completed successfully.'
+    end)
+    notify(src, message or (ok and 'Transfer completed successfully.' or 'Transfer failed.'), ok and 'success' or 'error')
 end)
