@@ -17,6 +17,9 @@ Config.MaxTransfer = 1000000
 
 Config.TransferFee = 0
 
+-- Minimum delay between money requests from the same character (milliseconds).
+Config.TransactionCooldown = 1000
+
 Config.TransactionHistoryLimit = 50
 
 Config.BankLocations = {
