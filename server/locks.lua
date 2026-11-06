@@ -44,9 +44,9 @@ local lastRequest = {}
 function BCBanking.CheckCooldown(citizenid)
     local now = GetGameTimer()
     local cooldown = math.max(250, tonumber(Config.TransactionCooldown) or 1000)
-    local previous = lastRequest[citizenid] or 0
+    local previous = lastRequest[citizenid]
 
-    if now - previous < cooldown then
+    if previous and now - previous < cooldown then
         return false
     end
 
