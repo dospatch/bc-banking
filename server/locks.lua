@@ -54,9 +54,3 @@ function BCBanking.CheckCooldown(citizenid)
     return true
 end
 
-AddEventHandler('playerDropped', function()
-    local Player = QBCore and QBCore.Functions.GetPlayer(source)
-    if Player and Player.PlayerData then
-        lastRequest[Player.PlayerData.citizenid] = nil
-    end
-end)
