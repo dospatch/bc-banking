@@ -13,6 +13,8 @@ RegisterNetEvent('bc-banking:server:deposit', function(value)
     local initial = QBCore.Functions.GetPlayer(src)
     if not initial then return end
     local cid = initial.PlayerData.citizenid
+    if not BCBanking.CheckCooldown(cid) then notify(src, 'Please wait a moment before making another banking request.') return end
+    if not BCBanking.CheckCooldown(cid) then notify(src, 'Please wait a moment before making another banking request.') return end
     local amount = validAmount(value, Config.MaxDeposit)
     if not amount then notify(src, 'Enter a valid deposit amount within the transaction limit.') return end
 
