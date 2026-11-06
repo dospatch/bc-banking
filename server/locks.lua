@@ -37,3 +37,26 @@ function BCBanking.WithPlayerLocks(citizenIds, callback)
 
     return result, message
 end
+
+-- Lightweight server-side request throttling to reject rapid duplicate clicks/events.
+local lastRequest = {}
+
+function BCBanking.CheckCooldown(citizenid)
+    local now = GetGameTimer()
+    local cooldown = math.max(250, tonumber(Config.TransactionCooldown) or 1000)
+    local previous = lastRequest[citizenid] or 0
+
+    if now - previous < cooldown then
+        return false
+    end
+
+    lastRequest[citizenid] = now
+    return true
+end
+
+AddEventHandler('playerDropped', function()
+    local Player = QBCore and QBCore.Functions.GetPlayer(source)
+    if Player and Player.PlayerData then
+        lastRequest[Player.PlayerData.citizenid] = nil
+    end
+end)
