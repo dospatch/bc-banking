@@ -13,6 +13,7 @@ RegisterNetEvent('bc-banking:server:transfer', function(targetAccountNumber, val
     local initial = QBCore.Functions.GetPlayer(src)
     if not initial then return end
     local senderCid = initial.PlayerData.citizenid
+    if not BCBanking.CheckCooldown(senderCid) then notify(src, 'Please wait a moment before making another banking request.') return end
     targetAccountNumber = BCBanking.Trim(targetAccountNumber)
     description = BCBanking.Trim(description)
     local amount = validAmount(value)
