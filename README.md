@@ -60,7 +60,7 @@ Built for **QBCore** with **oxmysql**, BC-Banking is designed to be simple to in
 
 * Configurable bank locations
 * World interaction markers
-* Press **E** to access banking
+* Use **ox_target** to access banking
 * Easy configuration for custom locations
 
 ### 🔐 Security
@@ -83,6 +83,8 @@ BC-Banking requires:
 * **FiveM**
 * **QBCore**
 * **oxmysql**
+* **ox_target**
+* **ox_inventory** (optional; works alongside QBCore money accounts)
 
 Make sure these resources are installed and started before BC-Banking.
 
@@ -91,6 +93,8 @@ Recommended start order:
 ```cfg
 ensure qb-core
 ensure oxmysql
+ensure ox_target
+ensure ox_inventory
 ensure bc-banking
 ```
 
@@ -179,7 +183,7 @@ ensure oxmysql
 ensure bc-banking
 ```
 
-Make sure `oxmysql` is started before BC-Banking.
+Make sure `qb-core`, `oxmysql`, and `ox_target` are started before BC-Banking. `ox_inventory` may also be started before it when used by your server.
 
 ---
 
@@ -546,6 +550,8 @@ The resource uses QBCore for:
 * Player character information
 * Server-side money operations
 * Player loading
+
+Bank and ATM interactions are handled by `ox_target`. The resource uses QBCore cash and bank money accounts as its authoritative balances; `ox_inventory` can run alongside it without creating a second cash balance. If your server has a custom inventory-item cash setup, that requires a dedicated money adapter.
 
 BC-Banking initializes QBCore through:
 
