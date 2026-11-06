@@ -2,13 +2,16 @@ fx_version 'cerulean'
 game 'gta5'
 
 author 'BCGAMING'
-description 'BC-Banking - QBCore Banking System'
+description 'BC-Banking - Custom QBCore Banking System'
 version '1.0.0'
 
 lua54 'yes'
 
-dependency 'qb-core'
-dependency 'oxmysql'
+dependencies {
+    'qb-core',
+    'oxmysql',
+    'ox_target'
+}
 
 shared_scripts {
     'config.lua',
@@ -18,7 +21,7 @@ shared_scripts {
 client_scripts {
     'client/main.lua',
     'client/commands.lua',
-    'client/atm.lua',
+    'client/targets.lua',
     'client/banking.lua',
     'client/nui.lua'
 }
