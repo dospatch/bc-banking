@@ -29,6 +29,8 @@ RegisterNetEvent('bc-banking:server:deposit', function(value)
             if not refunded then print(('[bc-banking] CRITICAL: deposit credit and cash refund failed for %s'):format(cid)) end
             return false, refunded and 'Your bank account could not be credited. The deposit was reversed.' or 'Deposit failed and refund could not be confirmed. Contact staff.'
         end
+        local synced, syncError = pcall(function() return exports['bc-banking']:SyncAccountBalance(cid, Player.PlayerData.money.bank) end)
+        if not synced then print(('[bc-banking] Could not sync account balance mirror for %s: %s'):format(cid, syncError)) end
         local logged, id = pcall(function() return exports['bc-banking']:AddTransaction(cid, 'deposit', amount, 'Cash deposit') end)
         if not logged or not id then print(('[bc-banking] Deposit succeeded but transaction logging failed for %s.'):format(cid)) end
         return true, 'Deposit completed.'
@@ -57,6 +59,8 @@ RegisterNetEvent('bc-banking:server:withdraw', function(value)
             if not refunded then print(('[bc-banking] CRITICAL: cash credit and bank refund failed for %s'):format(cid)) end
             return false, refunded and 'Cash could not be credited. The withdrawal was reversed.' or 'Withdrawal failed and refund could not be confirmed. Contact staff.'
         end
+        local synced, syncError = pcall(function() return exports['bc-banking']:SyncAccountBalance(cid, Player.PlayerData.money.bank) end)
+        if not synced then print(('[bc-banking] Could not sync account balance mirror for %s: %s'):format(cid, syncError)) end
         local logged, id = pcall(function() return exports['bc-banking']:AddTransaction(cid, 'withdraw', amount, 'Cash withdrawal') end)
         if not logged or not id then print(('[bc-banking] Withdrawal succeeded but transaction logging failed for %s.'):format(cid)) end
         return true, 'Withdrawal completed.'
