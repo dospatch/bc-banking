@@ -56,6 +56,10 @@ RegisterNetEvent('bc-banking:server:transfer', function(targetAccountNumber, val
         local credited = false
         if Receiver then
             credited = Receiver.Functions.AddMoney('bank', amount, 'bc-banking-transfer') == true
+            if credited then
+                local synced, syncError = pcall(function() return exports['bc-banking']:SyncAccountBalance(receiverAccount.citizenid, Receiver.PlayerData.money.bank) end)
+                if not synced then print(('[bc-banking] Could not sync recipient account mirror for %s: %s'):format(receiverAccount.citizenid, syncError)) end
+            end
         else
             local affected = MySQL.update.await([[
                 UPDATE players
@@ -67,6 +71,10 @@ RegisterNetEvent('bc-banking:server:transfer', function(targetAccountNumber, val
                 WHERE citizenid = ?
             ]], { amount, receiverAccount.citizenid })
             credited = (tonumber(affected) or 0) > 0
+            if credited then
+                local synced, syncError = pcall(function() return exports['bc-banking']:IncrementAccountBalance(receiverAccount.citizenid, amount) end)
+                if not synced then print(('[bc-banking] Could not sync offline recipient account mirror for %s: %s'):format(receiverAccount.citizenid, syncError)) end
+            end
         end
 
         if not credited then
@@ -77,6 +85,9 @@ RegisterNetEvent('bc-banking:server:transfer', function(targetAccountNumber, val
             end
             return false, 'The recipient could not be credited. Your money was refunded.'
         end
+
+        local senderSynced, senderSyncError = pcall(function() return exports['bc-banking']:SyncAccountBalance(senderCid, Sender.PlayerData.money.bank) end)
+        if not senderSynced then print(('[bc-banking] Could not sync sender account mirror for %s: %s'):format(senderCid, senderSyncError)) end
 
         local senderText = description ~= '' and description or 'Bank transfer sent'
         local outOk, outId = pcall(function()
