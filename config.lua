@@ -9,6 +9,7 @@ Config.Currency = '$'
 
 Config.AccountNumberLength = 10
 
+-- Deprecated: QBCore PlayerData.money.bank is authoritative; this value is not used.
 Config.StartingBankBalance = 0
 
 Config.MaxDeposit = 1000000
