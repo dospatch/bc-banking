@@ -73,6 +73,10 @@ Built for **QBCore** with **oxmysql**, BC-Banking is designed to be simple to in
 * Self-transfer protection
 * Insufficient-balance protection
 * QBCore server-side money handling
+* Per-character operation locks to serialize simultaneous requests
+* Request cooldown to reduce rapid duplicate submissions
+* Money-removal and credit-result checks with compensating refunds on failed credits
+* Offline recipient database credit verification
 
 ---
 
@@ -167,6 +171,8 @@ Config.MaxWithdrawal = 1000000
 Config.MaxTransfer = 1000000
 
 Config.TransferFee = 0
+
+Config.TransactionCooldown = 1000
 
 Config.TransactionHistoryLimit = 50
 ```
@@ -474,6 +480,8 @@ Controls the maximum amount players can deposit, withdraw, or transfer.
 ```lua
 Config.TransferFee = 0
 ```
+
+`Config.TransactionCooldown` sets the minimum delay between deposit, withdrawal, and transfer requests from the same character (default: 1000 ms).
 
 Set a transfer fee if your server wants to charge players for transfers.
 
@@ -790,7 +798,7 @@ Also check the FiveM client console for JavaScript or NUI errors.
 
 **Current Version:** `1.0.0`
 
-**Release Status:** Initial Release
+**Release Status:** V1.0 development build — requires FiveM runtime testing before production use
 
 ---
 
