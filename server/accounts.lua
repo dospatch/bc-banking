@@ -50,6 +50,7 @@ exports('CreateAccount', function(Player)
     end
 
     local accountNumber = generateAccountNumber()
+    local bankBalance = tonumber(Player.PlayerData.money.bank) or 0
 
     MySQL.insert.await(
         [[
@@ -61,7 +62,7 @@ exports('CreateAccount', function(Player)
             citizenid,
             accountNumber,
             'checking',
-            Config.StartingBankBalance
+            bankBalance
         }
     )
 
@@ -75,4 +76,19 @@ AddEventHandler('QBCore:Server:PlayerLoaded', function(Player)
     if Player then
         exports['bc-banking']:CreateAccount(Player)
     end
+end)
+
+-- QBCore remains the source of truth; this column is a synchronized display mirror.
+exports('SyncAccountBalance', function(citizenid, balance)
+    return MySQL.update.await(
+        'UPDATE bc_banking_accounts SET balance = ? WHERE citizenid = ?',
+        { BCBanking.RoundMoney(balance), citizenid }
+    )
+end)
+
+exports('IncrementAccountBalance', function(citizenid, amount)
+    return MySQL.update.await(
+        'UPDATE bc_banking_accounts SET balance = balance + ? WHERE citizenid = ?',
+        { BCBanking.RoundMoney(amount), citizenid }
+    )
 end)
