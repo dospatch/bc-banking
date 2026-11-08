@@ -189,11 +189,11 @@ RegisterNetEvent('bc-banking:v2:transfer', function(data)
     local from = member(fromId, cid)
     local to = MySQL.single.await("SELECT * FROM bc_banking_v2_accounts WHERE account_number = ? AND status = 'active' LIMIT 1", { toNumber })
     if not from or not to then return end
+    local permissions = type(from.permissions) == 'table' and from.permissions or json.decode(from.permissions or '{}') or {}
+    if not permissions.transfer or tonumber(from.id) == tonumber(to.id) then return end
     local idempotencyKey, idemState = claimIdempotency(cid, 'account.transfer', data)
     if idemState == 'already_completed' then TriggerClientEvent('bc-banking:client:notify', src, 'This transfer was already processed.', 'success'); return end
     if not idempotencyKey then TriggerClientEvent('bc-banking:client:notify', src, 'Transfer request rejected: ' .. tostring(idemState), 'error'); return end
-    local permissions = type(from.permissions) == 'table' and from.permissions or json.decode(from.permissions or '{}') or {}
-    if not permissions.transfer or tonumber(from.id) == tonumber(to.id) then return end
     local fee = math.max(0, tonumber(Config.V2 and Config.V2.InternalTransferFee) or 0)
     local total = value + fee
     local ref = ('%s-%s-%s'):format(os.time(), src, math.random(100000, 999999))
@@ -452,7 +452,7 @@ RegisterNetEvent('bc-banking:v2:payroll', function(data)
     MySQL.insert.await([[
         INSERT INTO bc_banking_v2_ledger (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description, metadata)
         VALUES (?, ?, 'payroll', ?, ?, ?, 'Business payroll payment', ?)
-    ]], { business.account_id, ref, value, balance, cid, json.encode({ employee=employeeCid }) })
+    ]], { business.account_id, ref, -value, balance, cid, json.encode({ employee=employeeCid }) })
     MySQL.insert.await('INSERT INTO bc_banking_v2_payroll (business_id, employee_citizenid, amount, actor_citizenid, status) VALUES (?, ?, ?, ?, "paid")', { businessId, employeeCid, value, cid })
     completeIdempotency(idempotencyKey, { success=true })
     logAudit(cid, 'business.payroll_paid', businessId, { employee=employeeCid, amount=value })
@@ -507,7 +507,9 @@ end)
 
 exports('GetV2AccountBalance', function(accountId, citizenid)
     local access = member(tonumber(accountId), citizenid)
-    return access and tonumber(access.balance) or nil
+    if not access then return nil end
+    local perms = type(access.permissions) == 'table' and access.permissions or json.decode(access.permissions or '{}') or {}
+    return perms.view == true and tonumber(access.balance) or nil
 end)
 
 exports('DepositToV2Account', function(accountId, citizenid, value, description)
@@ -563,6 +565,8 @@ end)
 exports('GetV2Ledger', function(accountId, citizenid, limit)
     local access = member(tonumber(accountId), citizenid)
     if not access then return {} end
+    local perms = type(access.permissions) == 'table' and access.permissions or json.decode(access.permissions or '{}') or {}
+    if perms.view ~= true and perms.statements ~= true then return {} end
     return MySQL.query.await('SELECT entry_type, amount, balance_after, description, created_at FROM bc_banking_v2_ledger WHERE account_id = ? ORDER BY id DESC LIMIT ?', { accountId, math.max(1, math.min(tonumber(limit) or 50, 200)) }) or {}
 end)
 
@@ -731,11 +735,11 @@ exports('RecordBusinessExpense', function(businessId, actorCitizenid, value, cat
         WHERE b.id = ? AND m.citizenid = ? AND m.status = 'active' AND b.status = 'active'
     ]], { businessId, actorCitizenid })
     if not business then return false, 'not_authorized' end
+    local perms = type(business.permissions) == 'table' and business.permissions or json.decode(business.permissions or '{}') or {}
+    if not perms.withdraw then return false, 'not_authorized' end
     local idem, idemState = claimIdempotency(actorCitizenid, 'business.expense', { idempotencyKey=idempotencyKey, businessId=businessId, amount=n, category=category, description=description })
     if idemState == 'already_completed' then return true end
     if not idem then return false, idemState end
-    local perms = type(business.permissions) == 'table' and business.permissions or json.decode(business.permissions or '{}') or {}
-    if not perms.withdraw then return false, 'not_authorized' end
     local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ? AND balance >= ? AND status = "active"', { n, business.account_id, n })
     if not changed or changed < 1 then return false, 'insufficient_funds' end
     local ok = pcall(function()
@@ -743,7 +747,7 @@ exports('RecordBusinessExpense', function(businessId, actorCitizenid, value, cat
         MySQL.insert.await([[
             INSERT INTO bc_banking_v2_ledger (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description)
             SELECT id, ?, 'business_expense', ?, balance, ?, ? FROM bc_banking_v2_accounts WHERE id = ?
-        ]], { ('exp-%s-%s'):format(os.time(), math.random(100000,999999)), n, actorCitizenid, tostring(description or 'Business expense'):sub(1,255), business.account_id })
+        ]], { ('exp-%s-%s'):format(os.time(), math.random(100000,999999)), -n, actorCitizenid, tostring(description or 'Business expense'):sub(1,255), business.account_id })
     end)
     if not ok then
         MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ?', { n, business.account_id })
@@ -756,6 +760,8 @@ end)
 exports('GetAccountStatement', function(accountId, citizenid, fromDate, toDate, limit)
     local access = member(tonumber(accountId), citizenid)
     if not access then return {} end
+    local perms = type(access.permissions) == 'table' and access.permissions or json.decode(access.permissions or '{}') or {}
+    if perms.view ~= true and perms.statements ~= true then return {} end
     return MySQL.query.await([[
         SELECT transaction_ref, entry_type, amount, balance_after, description, created_at
         FROM bc_banking_v2_ledger
@@ -817,6 +823,7 @@ local function processScheduledPayments()
                         SET src.balance = src.balance + ?, dst.balance = dst.balance - ?
                         WHERE src.id = ?
                     ]], { payment.destination_account_id, payment.amount, payment.amount, payment.source_account_id })
+                    MySQL.update.await('DELETE FROM bc_banking_v2_ledger WHERE transaction_ref = ?', { ref })
                     MySQL.update.await("UPDATE bc_banking_v2_scheduled_payments SET status = 'failed' WHERE id = ?", { payment.id })
                 end
             else
