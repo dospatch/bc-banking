@@ -33,6 +33,21 @@ V2 currently adds:
 5. Set a private `Config.V2.CardPepper` value in the installed server copy; do not commit it to GitHub.
 6. Keep production on V1 until all V2 tests pass and a release is explicitly approved.
 
+### Optional ox_inventory physical card items
+The resource does not require ox_inventory. To give players a physical-style card item, enable `Config.V2.CardItem.Enabled` and add this item to your ox_inventory item definitions:
+
+```lua
+['bc_bank_card'] = {
+    label = 'BC Bank Card',
+    weight = 10,
+    stack = false,
+    close = true,
+    description = 'A physical-style BC-Banking debit card'
+},
+```
+
+Keep `Config.V2.CardItem.Name` set to the item name you registered. Virtual cards remain in the banking interface and are not added to inventory. Card records are roleplay records, not connections to a real-world card network.
+
 ## ✨ Features
 
 ### 💳 Banking System
