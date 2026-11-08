@@ -1277,18 +1277,22 @@ RegisterNetEvent('bc-banking:v2:applyBusinessLoan', function(data)
     if not businessId or not principal or months < 1 or months > (tonumber(Config.V2 and Config.V2.MaxLoanMonths) or 24) then return end
     local owner = MySQL.single.await("SELECT id FROM bc_banking_v2_business_members WHERE business_id = ? AND citizenid = ? AND role = 'owner' AND status = 'active'", { businessId, cid })
     if not owner then TriggerClientEvent('bc-banking:client:notify', src, 'Only the business owner can apply for a business loan.', 'error'); return end
-    local open = tonumber(MySQL.scalar.await("SELECT COUNT(*) FROM bc_banking_v2_business_loans WHERE business_id = ? AND status IN ('pending','active')", { businessId }) or 0)
-    if open > 0 then TriggerClientEvent('bc-banking:client:notify', src, 'This business already has an open loan.', 'error'); return end
     local rate = math.max(0, tonumber(Config.V2 and Config.V2.LoanAPR) or 5)
-    local id = MySQL.insert.await([[
-        INSERT INTO bc_banking_v2_business_loans (business_id, applicant_citizenid, principal, apr, term_months, status)
-        VALUES (?, ?, ?, ?, ?, 'pending')
-    ]], { businessId, cid, principal, rate, months })
-    if id then
-        logAudit(cid, 'business_loan.applied', id, { business_id=businessId, principal=principal, term=months })
-        TriggerClientEvent('bc-banking:client:notify', src, 'Business loan application submitted.', 'success')
-        TriggerClientEvent('bc-banking:client:v2:refresh', src)
+    local id, err = BCBanking.WithPlayerLocks({ cid }, function()
+        local open = tonumber(MySQL.scalar.await("SELECT COUNT(*) FROM bc_banking_v2_business_loans WHERE business_id = ? AND status IN ('pending','active','processing')", { businessId }) or 0)
+        if open > 0 then return nil, 'This business already has an open loan.' end
+        return MySQL.insert.await([[
+            INSERT INTO bc_banking_v2_business_loans (business_id, applicant_citizenid, principal, apr, term_months, status)
+            VALUES (?, ?, ?, ?, ?, 'pending')
+        ]], { businessId, cid, principal, rate, months })
+    end)
+    if not id then
+        TriggerClientEvent('bc-banking:client:notify', src, err or 'Business loan application could not be submitted.', 'error')
+        return
     end
+    logAudit(cid, 'business_loan.applied', id, { business_id=businessId, principal=principal, term=months })
+    TriggerClientEvent('bc-banking:client:notify', src, 'Business loan application submitted.', 'success')
+    TriggerClientEvent('bc-banking:client:v2:refresh', src)
 end)
 
 RegisterNetEvent('bc-banking:v2:repayBusinessLoan', function(data)
