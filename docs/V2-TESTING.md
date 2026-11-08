@@ -58,5 +58,12 @@
 - Verify V1 stays available if V2 migration fails.
 - Confirm `main` and stable release remain unchanged.
 
+## Discord and optional integrations
+- Configure separate general, deposits, withdrawals, transfers, fees and other webhooks; verify V2 audit events route to the expected category and duplicate URLs are not sent twice.
+- Leave webhook values blank in the public repository and verify no secrets appear in logs or commits.
+- With ox_inventory disabled, issue and use virtual/physical-style card records without a hard dependency.
+- With ox_inventory enabled and the configured item registered, verify physical-style cards are delivered with only card ID and last-four metadata; virtual cards must not create inventory items.
+- Verify BC Systems `ChargePlayer`, account deposit/withdraw exports and business expense exports reject missing/invalid idempotency keys and do not double-move funds on retries.
+
 ## Release gate
 All critical tests must pass, migration rehearsal and restore must succeed, no balance duplication/loss bugs can remain, and a manual FiveM runtime test report must be documented before V2.0.0 is tagged.
