@@ -17,7 +17,7 @@ V2 currently adds:
 - Cash/bank funding and withdrawals, account transfers, statements and integration exports.
 - Savings goals and configurable daily savings interest.
 - Debit-card records, freeze/unfreeze, replacement, salted PIN hashes and failed-PIN lockout.
-- Loan applications, staff approval/rejection and repayments.
+- Personal and business loan applications, staff approval/rejection and repayments.
 - Business accounts, employee permissions, payroll and expense recording.
 - One-time, weekly and monthly scheduled account payments.
 - Admin account controls, audit records and BC Systems payment/business exports.
