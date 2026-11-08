@@ -297,7 +297,7 @@ RegisterNetEvent('bc-banking:v2:addBusinessEmployee', function(data)
     local src, cid = source, cidFor(source)
     if not cid or type(data) ~= 'table' then return end
     local businessId, employeeCid = tonumber(data.businessId), tostring(data.citizenid or '')
-    if not businessId or #employeeCid < 2 or #employeeCid > 50 then return end
+    if not businessId or #employeeCid < 2 or #employeeCid > 50 or employeeCid == cid then return end
     local owner = MySQL.single.await("SELECT id FROM bc_banking_v2_business_members WHERE business_id = ? AND citizenid = ? AND role = 'owner' AND status = 'active'", { businessId, cid })
     if not owner then return end
     local perms = { view=data.permissions and data.permissions.view == true, deposit=data.permissions and data.permissions.deposit == true, withdraw=data.permissions and data.permissions.withdraw == true, transfer=data.permissions and data.permissions.transfer == true, payroll=data.permissions and data.permissions.payroll == true, manage=false }
@@ -375,7 +375,8 @@ RegisterCommand('bcbankloan', function(src, args)
         local payment = loan.principal * (1 + (loan.apr / 100) * (loan.term_months / 12)) / loan.term_months
         local player = QBCore.Functions.GetPlayerByCitizenId(loan.citizenid)
         if player then
-            player.Functions.AddMoney('bank', tonumber(loan.principal), 'bc-banking-loan-disbursement')
+            local paid = player.Functions.AddMoney('bank', tonumber(loan.principal), 'bc-banking-loan-disbursement')
+            if not paid then print('[bc-banking] Loan disbursement failed; application left pending.'); return end
         else
             local changed = MySQL.update.await("UPDATE players SET money = JSON_SET(money, '$.bank', COALESCE(JSON_EXTRACT(money, '$.bank'), 0) + ?) WHERE citizenid = ?", { loan.principal, loan.citizenid })
             if not changed or changed < 1 then print('[bc-banking] Loan disbursement failed; application left pending.'); return end
@@ -533,30 +534,34 @@ local function accrueSavingsInterest()
     for _, account in ipairs(accounts) do
         local interest = math.floor((tonumber(account.balance) * rate / 100 / 365) * 100 + 0.5) / 100
         if interest > 0 then
-            local inserted = MySQL.insert.await([[
+            -- The unique date row prevents duplicate accruals. The account and
+            -- accrual row are then updated together in one atomic SQL statement.
+            MySQL.insert.await([[
                 INSERT IGNORE INTO bc_banking_v2_interest_accruals
                 (account_id, accrual_date, annual_rate, amount, balance_after)
                 VALUES (?, ?, ?, ?, 0)
             ]], { account.id, date, rate, interest })
-            if inserted and inserted > 0 then
-                local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ? AND status = "active"', { interest, account.id })
-                if changed and changed > 0 then
-                    local balance = MySQL.scalar.await('SELECT balance FROM bc_banking_v2_accounts WHERE id = ?', { account.id })
-                    MySQL.update.await('UPDATE bc_banking_v2_interest_accruals SET balance_after = ? WHERE account_id = ? AND accrual_date = ?', { balance, account.id, date })
-                    MySQL.insert.await([[
-                        INSERT INTO bc_banking_v2_ledger
-                        (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description)
-                        SELECT id, ?, 'interest', ?, balance, owner_citizenid, 'Daily savings interest'
-                        FROM bc_banking_v2_accounts WHERE id = ?
-                    ]], { ('int-%s-%s'):format(date, account.id), interest, account.id })
-                else
-                    MySQL.update.await('DELETE FROM bc_banking_v2_interest_accruals WHERE account_id = ? AND accrual_date = ?', { account.id, date })
-                end
-            end
+            MySQL.update.await([[
+                UPDATE bc_banking_v2_accounts a
+                JOIN bc_banking_v2_interest_accruals i ON i.account_id = a.id
+                SET a.balance = a.balance + i.amount,
+                    i.balance_after = a.balance + i.amount
+                WHERE a.id = ? AND i.accrual_date = ? AND i.balance_after = 0
+                  AND a.status = 'active'
+            ]], { account.id, date })
+            -- INSERT IGNORE + deterministic reference makes this safe to retry
+            -- if the process stopped after the balance update but before logging.
+            MySQL.insert.await([[
+                INSERT IGNORE INTO bc_banking_v2_ledger
+                (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description)
+                SELECT a.id, ?, 'interest', i.amount, i.balance_after, a.owner_citizenid, 'Daily savings interest'
+                FROM bc_banking_v2_accounts a
+                JOIN bc_banking_v2_interest_accruals i ON i.account_id = a.id
+                WHERE a.id = ? AND i.accrual_date = ? AND i.balance_after > 0
+            ]], { ('int-%s-%s'):format(date, account.id), account.id, date })
         end
     end
 end
-
 CreateThread(function()
     while true do
         Wait(3600000)
