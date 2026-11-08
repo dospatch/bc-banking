@@ -231,8 +231,14 @@ function bindV2(id, endpoint, values) {
     const button = document.getElementById(id);
     if (!button) return;
     button.addEventListener('click', async () => {
-        await nui(endpoint, values());
-        window.setTimeout(refreshV2, 700);
+        if (button.disabled) return;
+        button.disabled = true;
+        try {
+            await nui(endpoint, values());
+            window.setTimeout(refreshV2, 700);
+        } finally {
+            window.setTimeout(() => { button.disabled = false; }, 900);
+        }
     });
 }
 
