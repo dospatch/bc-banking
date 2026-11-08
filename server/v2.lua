@@ -321,6 +321,8 @@ RegisterNetEvent('bc-banking:v2:issueCard', function(data)
     local src, cid = source, cidFor(source)
     if not cid or type(data) ~= 'table' then return end
     local accountId = tonumber(data.accountId)
+    local cardType = tostring(data.cardType or 'physical')
+    if cardType ~= 'physical' and cardType ~= 'virtual' then return end
     if not accountId or not member(accountId, cid) then return end
     local count = tonumber(MySQL.scalar.await("SELECT COUNT(*) FROM bc_banking_v2_cards WHERE citizenid = ? AND status = 'active'", { cid }) or 0)
     if count >= (tonumber(Config.V2 and Config.V2.MaxCards) or 3) then
@@ -332,8 +334,8 @@ RegisterNetEvent('bc-banking:v2:issueCard', function(data)
     -- The token is hashed by the database and never stored in plaintext.
     local id = MySQL.insert.await([[
         INSERT INTO bc_banking_v2_cards (citizenid, account_id, card_hash, card_last4, card_type, status, expires_at)
-        VALUES (?, ?, SHA2(CONCAT(?, ?, ?), 256), ?, 'debit', 'active', DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 4 YEAR))
-    ]], { cid, accountId, nonce, salt, tostring(Config.V2 and Config.V2.CardPepper or ''), last4 })
+        VALUES (?, ?, SHA2(CONCAT(?, ?, ?), 256), ?, ?, 'active', DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 4 YEAR))
+    ]], { cid, accountId, nonce, salt, tostring(Config.V2 and Config.V2.CardPepper or ''), last4, cardType })
     if id then
         MySQL.insert.await('INSERT INTO bc_banking_v2_card_secrets (card_id, pin_salt) VALUES (?, ?)', { id, salt })
         logAudit(cid, 'card.issued', id, { last4=last4 })
@@ -911,7 +913,7 @@ RegisterNetEvent('bc-banking:v2:replaceCard', function(data)
     local src, cid = source, cidFor(source)
     local oldId = type(data) == 'table' and tonumber(data.cardId)
     if not cid or not oldId then return end
-    local card = MySQL.single.await("SELECT account_id FROM bc_banking_v2_cards WHERE id = ? AND citizenid = ? AND status IN ('active','frozen')", { oldId, cid })
+    local card = MySQL.single.await("SELECT account_id, card_type FROM bc_banking_v2_cards WHERE id = ? AND citizenid = ? AND status IN ('active','frozen')", { oldId, cid })
     if not card then return end
     MySQL.update.await("UPDATE bc_banking_v2_cards SET status = 'replaced' WHERE id = ? AND citizenid = ?", { oldId, cid })
     local nonce, salt = '', tostring(math.random(100000,999999)) .. tostring(os.time()) .. tostring(math.random(100000,999999))
@@ -919,8 +921,8 @@ RegisterNetEvent('bc-banking:v2:replaceCard', function(data)
     local last4 = nonce:sub(-4)
     local newId = MySQL.insert.await([[INSERT INTO bc_banking_v2_cards
         (citizenid, account_id, card_hash, card_last4, card_type, status, expires_at)
-        VALUES (?, ?, SHA2(CONCAT(?, ?, ?), 256), ?, 'debit', 'active', DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 4 YEAR))
-    ]], { cid, card.account_id, nonce, salt, tostring(Config.V2 and Config.V2.CardPepper or ''), last4 })
+        VALUES (?, ?, SHA2(CONCAT(?, ?, ?), 256), ?, ?, 'active', DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 4 YEAR))
+    ]], { cid, card.account_id, nonce, salt, tostring(Config.V2 and Config.V2.CardPepper or ''), last4, card.card_type })
     if newId then
         MySQL.insert.await('INSERT INTO bc_banking_v2_card_secrets (card_id, pin_salt) VALUES (?, ?)', { newId, salt })
         logAudit(cid, 'card.replaced', oldId, { new_card_id=newId, last4=last4 })
