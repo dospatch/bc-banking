@@ -209,3 +209,16 @@ footer span:first-child { color: #f28a24; font-weight: 800; }
     .welcome { align-items: flex-start; flex-direction: column; gap: 15px; }
     .account-number { text-align: left; }
 }
+
+
+.v2-section { margin-top: 22px; }
+.v2-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.v2-list { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; max-height: 180px; overflow-y: auto; }
+.v2-row { display: flex; flex-direction: column; gap: 4px; padding: 10px; border-radius: 8px; background: #0b111a; }
+.v2-row strong { font-size: 13px; }
+.v2-row span, .small { color: #8793a6; font-size: 11px; }
+.v2-row b { color: #f2a04b; font-size: 12px; }
+.panel select { width: 100%; padding: 12px; margin-bottom: 10px; border: 1px solid #2b394a; border-radius: 9px; background: #080d14; color: white; }
+.panel .mini-button { align-self: flex-start; padding: 7px 10px; border-radius: 7px; background: #263344; color: white; }
+.panel .small { margin-top: 10px; line-height: 1.5; }
+@media (max-width: 900px) { .v2-grid { grid-template-columns: 1fr; } }
