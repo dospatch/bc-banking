@@ -92,6 +92,21 @@ local function logAudit(actor, action, target, details)
         VALUES (?, ?, ?, ?, ?)
     ]], { actor, action, 'account', tostring(target or ''), json.encode(details or {}) })
 end
+
+local function givePhysicalCardItem(src, cardId, last4)
+    local itemConfig = Config.V2 and Config.V2.CardItem
+    if not itemConfig or itemConfig.Enabled ~= true then return true end
+    if GetResourceState('ox_inventory') ~= 'started' then return false end
+    local itemName = tostring(itemConfig.Name or 'bc_bank_card'):sub(1, 64)
+    local ok, added = pcall(function()
+        return exports.ox_inventory:AddItem(src, itemName, 1, {
+            cardId = tonumber(cardId),
+            last4 = tostring(last4),
+            issuer = 'BC-Banking'
+        })
+    end)
+    return ok and added == true
+end
 local function createAccount(citizenid, kind, name, initial)
     if not BCBanking.V2Ready then return nil, 'V2 database is not ready.' end
 
@@ -345,8 +360,13 @@ RegisterNetEvent('bc-banking:v2:issueCard', function(data)
             TriggerClientEvent('bc-banking:client:notify', src, 'Card could not be completed; no card was issued.', 'error')
             return
         end
-        logAudit(cid, 'card.issued', id, { last4=last4, card_type=cardType })
-        TriggerClientEvent('bc-banking:client:notify', src, cardType .. ' card issued ending in ' .. last4 .. '. Card number is not recoverable.', 'success')
+        local itemDelivered = cardType ~= 'physical' or givePhysicalCardItem(src, id, last4)
+        logAudit(cid, 'card.issued', id, { last4=last4, card_type=cardType, inventory_item_delivered=itemDelivered })
+        local notice = cardType .. ' card issued ending in ' .. last4 .. '. Card number is not recoverable.'
+        if cardType == 'physical' and Config.V2.CardItem and Config.V2.CardItem.Enabled and not itemDelivered then
+            notice = notice .. ' Inventory item delivery failed; check ox_inventory item setup.'
+        end
+        TriggerClientEvent('bc-banking:client:notify', src, notice, itemDelivered and 'success' or 'error')
         TriggerClientEvent('bc-banking:client:v2:refresh', src)
     end
 end)
@@ -1092,8 +1112,13 @@ RegisterNetEvent('bc-banking:v2:replaceCard', function(data)
         TriggerClientEvent('bc-banking:client:notify', src, 'Your existing card changed before replacement completed. No replacement was issued.', 'error')
         return
     end
-    logAudit(cid, 'card.replaced', oldId, { new_card_id=newId, last4=last4, card_type=card.card_type })
-    TriggerClientEvent('bc-banking:client:notify', src, 'Replacement card issued ending in ' .. last4 .. '.', 'success')
+    local itemDelivered = card.card_type ~= 'physical' or givePhysicalCardItem(src, newId, last4)
+    logAudit(cid, 'card.replaced', oldId, { new_card_id=newId, last4=last4, card_type=card.card_type, inventory_item_delivered=itemDelivered })
+    local notice = 'Replacement card issued ending in ' .. last4 .. '.'
+    if card.card_type == 'physical' and Config.V2.CardItem and Config.V2.CardItem.Enabled and not itemDelivered then
+        notice = notice .. ' Inventory item delivery failed; check ox_inventory item setup.'
+    end
+    TriggerClientEvent('bc-banking:client:notify', src, notice, itemDelivered and 'success' or 'error')
     TriggerClientEvent('bc-banking:client:v2:refresh', src)
 end)
 
