@@ -241,7 +241,7 @@ function Migration.Apply()
             INSERT INTO bc_banking_schema_versions (version, name)
             VALUES (?, ?)
             ON DUPLICATE KEY UPDATE name = VALUES(name)
-        ]], { 2, 'v2_full_banking_schema_3' })
+        ]], { 3, 'v2_full_banking_schema' })
     end)
 
     if not ok then
