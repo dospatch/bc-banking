@@ -945,3 +945,108 @@ exports('SetV2AccountStatus', function(accountId, status, actor)
     end
     return false
 end)
+
+
+QBCore.Functions.CreateCallback('bc-banking:v2:getBusinessLoans', function(src, cb)
+    local cid = cidFor(src)
+    if not cid then cb({}); return end
+    cb(MySQL.query.await([[
+        SELECT l.id, l.business_id, b.name AS business_name, l.principal, l.apr,
+               l.term_months, l.monthly_payment, l.balance_due, l.status,
+               l.created_at, l.reviewed_at
+        FROM bc_banking_v2_business_loans l
+        JOIN bc_banking_v2_businesses b ON b.id = l.business_id
+        JOIN bc_banking_v2_business_members m ON m.business_id = b.id
+        WHERE m.citizenid = ? AND m.status = 'active'
+        ORDER BY l.id DESC
+    ]], { cid }) or {})
+end)
+
+RegisterNetEvent('bc-banking:v2:applyBusinessLoan', function(data)
+    local src, cid = source, cidFor(source)
+    if not cid or type(data) ~= 'table' then return end
+    local businessId = tonumber(data.businessId)
+    local principal = amount(data.amount, tonumber(Config.V2 and Config.V2.MaxLoan) or 500000)
+    local months = math.floor(tonumber(data.months) or 0)
+    if not businessId or not principal or months < 1 or months > (tonumber(Config.V2 and Config.V2.MaxLoanMonths) or 24) then return end
+    local owner = MySQL.single.await("SELECT id FROM bc_banking_v2_business_members WHERE business_id = ? AND citizenid = ? AND role = 'owner' AND status = 'active'", { businessId, cid })
+    if not owner then TriggerClientEvent('bc-banking:client:notify', src, 'Only the business owner can apply for a business loan.', 'error'); return end
+    local open = tonumber(MySQL.scalar.await("SELECT COUNT(*) FROM bc_banking_v2_business_loans WHERE business_id = ? AND status IN ('pending','active')", { businessId }) or 0)
+    if open > 0 then TriggerClientEvent('bc-banking:client:notify', src, 'This business already has an open loan.', 'error'); return end
+    local rate = math.max(0, tonumber(Config.V2 and Config.V2.LoanAPR) or 5)
+    local id = MySQL.insert.await([[
+        INSERT INTO bc_banking_v2_business_loans (business_id, applicant_citizenid, principal, apr, term_months, status)
+        VALUES (?, ?, ?, ?, ?, 'pending')
+    ]], { businessId, cid, principal, rate, months })
+    if id then
+        logAudit(cid, 'business_loan.applied', id, { business_id=businessId, principal=principal, term=months })
+        TriggerClientEvent('bc-banking:client:notify', src, 'Business loan application submitted.', 'success')
+        TriggerClientEvent('bc-banking:client:v2:refresh', src)
+    end
+end)
+
+RegisterNetEvent('bc-banking:v2:repayBusinessLoan', function(data)
+    local src, cid = source, cidFor(source)
+    if not cid or type(data) ~= 'table' then return end
+    local loanId = tonumber(data.loanId)
+    local value = amount(data.amount, 100000000)
+    if not loanId or not value then return end
+    local loan = MySQL.single.await([[
+        SELECT l.*, b.account_id FROM bc_banking_v2_business_loans l
+        JOIN bc_banking_v2_businesses b ON b.id = l.business_id
+        JOIN bc_banking_v2_business_members m ON m.business_id = b.id
+        WHERE l.id = ? AND m.citizenid = ? AND m.role = 'owner'
+          AND m.status = 'active' AND l.status = 'active'
+        LIMIT 1
+    ]], { loanId, cid })
+    if not loan then return end
+    local due = tonumber(loan.balance_due) or 0
+    if value > due then value = due end
+    local debited = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ? AND balance >= ? AND status = "active"', { value, loan.account_id, value })
+    if not debited or debited < 1 then
+        TriggerClientEvent('bc-banking:client:notify', src, 'Insufficient business account funds.', 'error'); return
+    end
+    local remaining = math.max(0, due - value)
+    local changed = MySQL.update.await("UPDATE bc_banking_v2_business_loans SET balance_due = ?, status = ? WHERE id = ? AND status = 'active' AND balance_due >= ?", { remaining, remaining <= 0 and 'paid' or 'active', loanId, value })
+    if not changed or changed < 1 then
+        MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ?', { value, loan.account_id })
+        return
+    end
+    local balance = MySQL.scalar.await('SELECT balance FROM bc_banking_v2_accounts WHERE id = ?', { loan.account_id })
+    MySQL.insert.await([[
+        INSERT INTO bc_banking_v2_ledger (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description, metadata)
+        VALUES (?, ?, 'loan_repayment', ?, ?, ?, 'Business loan repayment', ?)
+    ]], { loan.account_id, ('bizloan-%s-%s'):format(loanId, os.time()), value, balance, cid, json.encode({ loan_id=loanId }) })
+    logAudit(cid, 'business_loan.repayment', loanId, { amount=value, remaining=remaining })
+    TriggerClientEvent('bc-banking:client:notify', src, 'Business loan repayment received.', 'success')
+    TriggerClientEvent('bc-banking:client:v2:refresh', src)
+end)
+
+RegisterCommand('bcbankbusinessloan', function(src, args)
+    if not BCBanking.V2Ready then print('[bc-banking] V2 database is not ready.'); return end
+    if src ~= 0 and not IsPlayerAceAllowed(src, 'bc-banking.admin') then return end
+    local id, decision = tonumber(args[1]), tostring(args[2] or '')
+    if not id or (decision ~= 'approve' and decision ~= 'reject') then
+        print('Usage: bcbankbusinessloan <applicationId> <approve|reject>'); return
+    end
+    local loan = MySQL.single.await("SELECT * FROM bc_banking_v2_business_loans WHERE id = ? AND status = 'pending'", { id })
+    if not loan then print('[bc-banking] Pending business loan not found.'); return end
+    if decision == 'reject' then
+        MySQL.update.await("UPDATE bc_banking_v2_business_loans SET status = 'rejected', reviewed_at = CURRENT_TIMESTAMP WHERE id = ?", { id })
+    else
+        local business = MySQL.single.await("SELECT account_id FROM bc_banking_v2_businesses WHERE id = ? AND status = 'active'", { loan.business_id })
+        if not business or not business.account_id then print('[bc-banking] Business account unavailable; loan left pending.'); return end
+        local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ? AND status = "active"', { loan.principal, business.account_id })
+        if not changed or changed < 1 then print('[bc-banking] Business loan disbursement failed.'); return end
+        local monthly = loan.principal * (1 + (loan.apr / 100) * (loan.term_months / 12)) / loan.term_months
+        local total = loan.principal * (1 + (loan.apr / 100) * (loan.term_months / 12))
+        MySQL.update.await("UPDATE bc_banking_v2_business_loans SET status = 'active', monthly_payment = ?, balance_due = ?, reviewed_at = CURRENT_TIMESTAMP, next_payment_at = DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 1 MONTH) WHERE id = ?", { monthly, total, id })
+        local balance = MySQL.scalar.await('SELECT balance FROM bc_banking_v2_accounts WHERE id = ?', { business.account_id })
+        MySQL.insert.await([[
+            INSERT INTO bc_banking_v2_ledger (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description, metadata)
+            VALUES (?, ?, 'loan_disbursement', ?, ?, ?, 'Business loan disbursement', ?)
+        ]], { business.account_id, ('bizloan-start-%s'):format(id), loan.principal, balance, loan.applicant_citizenid, json.encode({ loan_id=id }) })
+    end
+    logAudit(src == 0 and 'SERVER_CONSOLE' or (cidFor(src) or 'UNKNOWN'), 'business_loan.' .. decision, id, {})
+    print(('[bc-banking] Business loan %s %s.'):format(id, decision))
+end, true)
