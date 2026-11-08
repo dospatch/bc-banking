@@ -188,6 +188,9 @@
                             <input id="loanAmount" type="number" min="0.01" step="0.01" placeholder="Loan amount">
                             <input id="loanMonths" type="number" min="1" max="24" placeholder="Term in months">
                             <button id="applyLoanButton">Apply for Loan</button>
+                            <input id="repayLoanId" type="number" min="1" placeholder="Loan ID to repay">
+                            <input id="repayLoanAmount" type="number" min="0.01" step="0.01" placeholder="Repayment amount">
+                            <button id="repayLoanButton">Make Loan Repayment</button>
                             <p class="muted small">Applications require staff review. Admin command: /bcbankloan ID approve|reject</p>
                         </div>
                         <div class="panel">
@@ -199,6 +202,8 @@
                             <input id="employeeCitizenId" maxlength="50" placeholder="Employee citizen ID">
                             <input id="employeeAmount" type="number" min="0.01" step="0.01" placeholder="Payroll amount">
                             <button id="payrollButton">Send Payroll</button>
+                            <input id="employeePermissions" placeholder="Permissions: view,deposit,withdraw,transfer,payroll">
+                            <button id="addEmployeeButton">Add / Update Employee</button>
                             <p class="muted small">Owners can grant employee access through the server API. Payroll is permission-checked and audited.</p>
                         </div>
                     </div>
