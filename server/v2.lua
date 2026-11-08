@@ -337,9 +337,16 @@ RegisterNetEvent('bc-banking:v2:issueCard', function(data)
         VALUES (?, ?, SHA2(CONCAT(?, ?, ?), 256), ?, ?, 'active', DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 4 YEAR))
     ]], { cid, accountId, nonce, salt, tostring(Config.V2 and Config.V2.CardPepper or ''), last4, cardType })
     if id then
-        MySQL.insert.await('INSERT INTO bc_banking_v2_card_secrets (card_id, pin_salt) VALUES (?, ?)', { id, salt })
-        logAudit(cid, 'card.issued', id, { last4=last4 })
-        TriggerClientEvent('bc-banking:client:notify', src, 'Card issued ending in ' .. last4 .. '. Card number is not recoverable.', 'success')
+        local secretOk = pcall(function()
+            MySQL.insert.await('INSERT INTO bc_banking_v2_card_secrets (card_id, pin_salt) VALUES (?, ?)', { id, salt })
+        end)
+        if not secretOk then
+            MySQL.update.await('DELETE FROM bc_banking_v2_cards WHERE id = ? AND citizenid = ?', { id, cid })
+            TriggerClientEvent('bc-banking:client:notify', src, 'Card could not be completed; no card was issued.', 'error')
+            return
+        end
+        logAudit(cid, 'card.issued', id, { last4=last4, card_type=cardType })
+        TriggerClientEvent('bc-banking:client:notify', src, cardType .. ' card issued ending in ' .. last4 .. '. Card number is not recoverable.', 'success')
         TriggerClientEvent('bc-banking:client:v2:refresh', src)
     end
 end)
@@ -1114,7 +1121,7 @@ RegisterNetEvent('bc-banking:v2:withdrawAccount', function(data)
     if idemState == 'already_completed' then TriggerClientEvent('bc-banking:client:notify', src, 'This withdrawal was already processed.', 'success'); return end
     if not idempotencyKey then TriggerClientEvent('bc-banking:client:notify', src, 'Withdrawal request rejected: ' .. tostring(idemState), 'error'); return end
     local player = playerFor(src)
-    if not player then return end
+    if not player then failIdempotency(idempotencyKey, 'player_unavailable'); return end
     local ok, message = BCBanking.WithPlayerLocks({ cid }, function()
         local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ? AND status = "active" AND balance >= ?', { value, accountId, value })
         if not changed or changed < 1 then return false, 'Insufficient account funds.' end
