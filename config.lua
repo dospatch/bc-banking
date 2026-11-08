@@ -16,7 +16,12 @@ Config.V2 = {
     MaxPayrollPayment = 100000,
     InternalTransferFee = 0,
     -- Optional secret used only as additional entropy for card verification hashes.
-    CardPepper = ''
+    CardPepper = '',
+    -- Optional ox_inventory item delivery for physical-style cards.
+    CardItem = {
+        Enabled = false,
+        Name = 'bc_bank_card'
+    }
 }
 
 Config.BankCommand = 'bank'
