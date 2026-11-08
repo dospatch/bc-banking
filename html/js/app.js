@@ -26,6 +26,13 @@ function money(value) {
 }
 
 async function nui(endpoint, data = {}) {
+    const idempotentEndpoints = ['v2Transfer', 'fundV2Account', 'withdrawV2Account'];
+    if (idempotentEndpoints.includes(endpoint)) {
+        const key = window.crypto && typeof window.crypto.randomUUID === 'function'
+            ? window.crypto.randomUUID()
+            : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+        data = { ...data, idempotencyKey: key };
+    }
     const response = await fetch(`https://${resourceName}/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
