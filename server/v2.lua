@@ -707,6 +707,7 @@ exports('DepositToV2Account', function(accountId, citizenid, value, description,
         return false, 'ledger_error'
     end
     completeIdempotency(idem, { success=true, reference=ref })
+    logAudit(citizenid, 'account.deposit_api', accountId, { amount=n, reference=ref })
     return true
 end)
 
@@ -748,6 +749,7 @@ exports('WithdrawFromV2Account', function(accountId, citizenid, value, descripti
         return false, 'ledger_error'
     end
     completeIdempotency(idem, { success=true, reference=ref })
+    logAudit(citizenid, 'account.withdraw_api', accountId, { amount=n, reference=ref })
     return true
 end)
 
@@ -855,7 +857,7 @@ local function accrueSavingsInterest()
     if not BCBanking.V2Ready then return end
     local rate = math.max(0, tonumber(Config.V2 and Config.V2.SavingsAPR) or 0)
     if rate <= 0 then return end
-    local accounts = MySQL.query.await("SELECT id, balance FROM bc_banking_v2_accounts WHERE account_type = 'savings' AND status = 'active' AND balance > 0") or {}
+    local accounts = MySQL.query.await("SELECT id, balance, owner_citizenid FROM bc_banking_v2_accounts WHERE account_type = 'savings' AND status = 'active' AND balance > 0") or {}
     local date = os.date('%Y-%m-%d')
     for _, account in ipairs(accounts) do
         local interest = math.floor((tonumber(account.balance) * rate / 100 / 365) * 100 + 0.5) / 100
@@ -885,6 +887,7 @@ local function accrueSavingsInterest()
                 JOIN bc_banking_v2_interest_accruals i ON i.account_id = a.id
                 WHERE a.id = ? AND i.accrual_date = ? AND i.balance_after > 0
             ]], { ('int-%s-%s'):format(date, account.id), account.id, date })
+            logAudit(account.owner_citizenid, 'savings.interest_accrued', account.id, { amount=interest, date=date })
         end
     end
 end
@@ -978,6 +981,7 @@ exports('RecordBusinessExpense', function(businessId, actorCitizenid, value, cat
         return false, 'recording_failed'
     end
     completeIdempotency(idem, { success=true })
+    logAudit(actorCitizenid, 'business.expense', businessId, { amount=n, category=category, description=description })
     return true
 end)
 
@@ -1040,6 +1044,7 @@ local function processScheduledPayments()
                     else
                         MySQL.update.await("UPDATE bc_banking_v2_scheduled_payments SET status = 'completed' WHERE id = ?", { payment.id })
                     end
+                    logAudit(payment.owner_citizenid, 'scheduled_payment.executed', payment.id, { amount=payment.amount, frequency=payment.frequency, reference=ref })
                 else
                     MySQL.update.await([[
                         UPDATE bc_banking_v2_accounts AS src
@@ -1210,6 +1215,7 @@ RegisterNetEvent('bc-banking:v2:fundAccount', function(data)
             return false, 'Deposit could not be recorded and was reversed.'
         end
         completeIdempotency(idempotencyKey, { success=true })
+        logAudit(cid, 'account.deposit', accountId, { amount=value, source=sourceType })
         return true, 'Account funded.'
     end)
     if not ok then failIdempotency(idempotencyKey, message or 'deposit_failed') end
@@ -1251,6 +1257,7 @@ RegisterNetEvent('bc-banking:v2:withdrawAccount', function(data)
             return false, 'Withdrawal could not be recorded and was reversed.'
         end
         completeIdempotency(idempotencyKey, { success=true })
+        logAudit(cid, 'account.withdraw', accountId, { amount=value, destination=destination })
         return true, 'Withdrawal completed.'
     end)
     if not ok then failIdempotency(idempotencyKey, message or 'withdrawal_failed') end
