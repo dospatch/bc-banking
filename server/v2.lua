@@ -1088,3 +1088,29 @@ RegisterCommand('bcbankbusinessloan', function(src, args)
     logAudit(src == 0 and 'SERVER_CONSOLE' or (cidFor(src) or 'UNKNOWN'), 'business_loan.' .. decision, id, {})
     print(('[bc-banking] Business loan %s %s.'):format(id, decision))
 end, true)
+
+
+QBCore.Functions.CreateCallback('bc-banking:v2:getBusinessExpenses', function(src, cb, businessId)
+    local cid = cidFor(src)
+    businessId = tonumber(businessId)
+    if not cid or not businessId then cb({}); return end
+    local membership = MySQL.single.await("SELECT id FROM bc_banking_v2_business_members WHERE business_id = ? AND citizenid = ? AND status = 'active'", { businessId, cid })
+    if not membership then cb({}); return end
+    cb(MySQL.query.await([[
+        SELECT id, amount, category, description, actor_citizenid, created_at
+        FROM bc_banking_v2_business_expenses WHERE business_id = ?
+        ORDER BY id DESC LIMIT 50
+    ]], { businessId }) or {})
+end)
+
+RegisterNetEvent('bc-banking:v2:businessExpense', function(data)
+    local src, cid = source, cidFor(source)
+    if not cid or type(data) ~= 'table' then return end
+    local ok, reason = exports['bc-banking']:RecordBusinessExpense(
+        tonumber(data.businessId), cid, tonumber(data.amount),
+        tostring(data.category or 'general'), tostring(data.description or 'Business expense'),
+        data.idempotencyKey
+    )
+    TriggerClientEvent('bc-banking:client:notify', src, ok and 'Business expense recorded.' or ('Expense failed: ' .. tostring(reason)), ok and 'success' or 'error')
+    if ok then TriggerClientEvent('bc-banking:client:v2:refresh', src) end
+end)
