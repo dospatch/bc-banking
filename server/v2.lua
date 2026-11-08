@@ -4,6 +4,35 @@ BCBanking.V2 = BCBanking.V2 or {}
 
 local V2 = BCBanking.V2
 local function playerFor(src) return QBCore.Functions.GetPlayer(src) end
+
+local function claimIdempotency(citizenid, operation, payload)
+    if not BCBanking.V2Ready then return nil, 'v2_not_ready' end
+    local key = type(payload) == 'table' and tostring(payload.idempotencyKey or '') or ''
+    if #key < 8 or #key > 80 then return nil, 'idempotency_key_required' end
+    local scoped = MySQL.scalar.await("SELECT SHA2(CONCAT(?, ':', ?, ':', ?), 256)", { citizenid, operation, key })
+    local requestHash = MySQL.scalar.await("SELECT SHA2(?, 256)", { json.encode(payload) })
+    local inserted = MySQL.insert.await([[
+        INSERT IGNORE INTO bc_banking_v2_idempotency
+        (idempotency_key, actor_citizenid, operation, request_hash, status)
+        VALUES (?, ?, ?, ?, 'processing')
+    ]], { scoped, citizenid, operation, requestHash })
+    if inserted and inserted > 0 then return scoped, 'claimed' end
+    local previous = MySQL.single.await('SELECT request_hash, status FROM bc_banking_v2_idempotency WHERE idempotency_key = ?', { scoped })
+    if previous and previous.request_hash == requestHash and previous.status == 'completed' then
+        return nil, 'already_completed'
+    end
+    return nil, previous and previous.request_hash ~= requestHash and 'idempotency_conflict' or 'already_processing'
+end
+
+local function completeIdempotency(key, result)
+    if not key then return end
+    MySQL.update.await([[
+        UPDATE bc_banking_v2_idempotency
+        SET status = 'completed', result_json = ?, completed_at = CURRENT_TIMESTAMP
+        WHERE idempotency_key = ? AND status = 'processing'
+    ]], { json.encode(result or { success=true }), key })
+end
+
 local function cidFor(src)
     if not BCBanking.V2Ready then return nil end
     local p = playerFor(src)
@@ -102,6 +131,9 @@ RegisterNetEvent('bc-banking:v2:transfer', function(data)
     local from = member(fromId, cid)
     local to = MySQL.single.await("SELECT * FROM bc_banking_v2_accounts WHERE account_number = ? AND status = 'active' LIMIT 1", { toNumber })
     if not from or not to then return end
+    local idempotencyKey, idemState = claimIdempotency(cid, 'account.transfer', data)
+    if idemState == 'already_completed' then TriggerClientEvent('bc-banking:client:notify', src, 'This transfer was already processed.', 'success'); return end
+    if not idempotencyKey then TriggerClientEvent('bc-banking:client:notify', src, 'Transfer request rejected: ' .. tostring(idemState), 'error'); return end
     local permissions = type(from.permissions) == 'table' and from.permissions or json.decode(from.permissions or '{}') or {}
     if not permissions.transfer or tonumber(from.id) == tonumber(to.id) then return end
     local fee = math.max(0, tonumber(Config.V2 and Config.V2.InternalTransferFee) or 0)
@@ -146,6 +178,7 @@ RegisterNetEvent('bc-banking:v2:transfer', function(data)
         TriggerClientEvent('bc-banking:client:notify', src, 'Transfer was reversed because it could not be recorded.', 'error')
         return
     end
+    completeIdempotency(idempotencyKey, { success=true, reference=ref })
     logAudit(cid, 'account.transfer', fromId, { to=to.account_number, amount=value, fee=fee })
     TriggerClientEvent('bc-banking:client:notify', src, 'Transfer completed.', 'success')
     TriggerClientEvent('bc-banking:client:v2:refresh', src)
@@ -572,17 +605,21 @@ end)
 
 -- Server-side payment source API for BC resources. Client requests never decide
 -- whether funds exist; this export resolves the player's live QBCore balance.
-exports('ChargePlayer', function(source, value, paymentSource, reason)
+exports('ChargePlayer', function(source, value, paymentSource, reason, idempotencyKey)
     if not BCBanking.V2Ready then return false, 'v2_not_ready' end
     local player = playerFor(source)
     local n = amount(value, tonumber(Config.V2 and Config.V2.MaxPayment) or 1000000)
     if not player or not n then return false, 'invalid_request' end
+    local cid = player.PlayerData.citizenid
+    local idem, idemState = claimIdempotency(cid, 'player.charge', { idempotencyKey=idempotencyKey, amount=n, source=paymentSource, reason=reason })
+    if idemState == 'already_completed' then return true end
+    if not idem then return false, idemState end
     local account = paymentSource == 'cash' and 'cash' or (paymentSource == 'bank' and 'bank' or nil)
     if not account then return false, 'invalid_payment_source' end
     if (tonumber(player.PlayerData.money[account]) or 0) < n then return false, 'insufficient_funds' end
     local removed = player.Functions.RemoveMoney(account, n, tostring(reason or 'BC Systems payment'):sub(1,100))
     if not removed then return false, 'payment_failed' end
-    local cid = player.PlayerData.citizenid
+    completeIdempotency(idem, { success=true })
     pcall(function()
         exports['bc-banking']:AddTransaction(cid, 'payment_' .. account, n, tostring(reason or 'BC Systems payment'))
     end)
@@ -790,6 +827,9 @@ RegisterNetEvent('bc-banking:v2:fundAccount', function(data)
     if not access then return end
     local perms = type(access.permissions) == 'table' and access.permissions or json.decode(access.permissions or '{}') or {}
     if not perms.deposit then return end
+    local idempotencyKey, idemState = claimIdempotency(cid, 'account.deposit', data)
+    if idemState == 'already_completed' then TriggerClientEvent('bc-banking:client:notify', src, 'This deposit was already processed.', 'success'); return end
+    if not idempotencyKey then TriggerClientEvent('bc-banking:client:notify', src, 'Deposit request rejected: ' .. tostring(idemState), 'error'); return end
     local player = playerFor(src)
     if not player then return end
     local ok, message = BCBanking.WithPlayerLocks({ cid }, function()
@@ -811,6 +851,7 @@ RegisterNetEvent('bc-banking:v2:fundAccount', function(data)
             player.Functions.AddMoney(sourceType, value, 'bc-banking-v2-account-deposit-refund')
             return false, 'Deposit could not be recorded and was reversed.'
         end
+        completeIdempotency(idempotencyKey, { success=true })
         return true, 'Account funded.'
     end)
     TriggerClientEvent('bc-banking:client:notify', src, message or (ok and 'Account funded.' or 'Deposit failed.'), ok and 'success' or 'error')
@@ -827,6 +868,9 @@ RegisterNetEvent('bc-banking:v2:withdrawAccount', function(data)
     if not access then return end
     local perms = type(access.permissions) == 'table' and access.permissions or json.decode(access.permissions or '{}') or {}
     if not perms.withdraw then return end
+    local idempotencyKey, idemState = claimIdempotency(cid, 'account.withdraw', data)
+    if idemState == 'already_completed' then TriggerClientEvent('bc-banking:client:notify', src, 'This withdrawal was already processed.', 'success'); return end
+    if not idempotencyKey then TriggerClientEvent('bc-banking:client:notify', src, 'Withdrawal request rejected: ' .. tostring(idemState), 'error'); return end
     local player = playerFor(src)
     if not player then return end
     local ok, message = BCBanking.WithPlayerLocks({ cid }, function()
@@ -847,6 +891,7 @@ RegisterNetEvent('bc-banking:v2:withdrawAccount', function(data)
             MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ?', { value, accountId })
             return false, 'Withdrawal could not be recorded and was reversed.'
         end
+        completeIdempotency(idempotencyKey, { success=true })
         return true, 'Withdrawal completed.'
     end)
     TriggerClientEvent('bc-banking:client:notify', src, message or (ok and 'Withdrawal completed.' or 'Withdrawal failed.'), ok and 'success' or 'error')
