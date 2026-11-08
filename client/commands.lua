@@ -3,5 +3,5 @@ RegisterCommand(Config.BankCommand, function()
 end, false)
 
 RegisterCommand(Config.ATMCommand, function()
-    BCBanking.OpenBank()
+    BCBanking.OpenBank(true)
 end, false)
