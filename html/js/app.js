@@ -181,8 +181,8 @@ function listRows(target, rows, renderRow, empty) {
 }
 
 async function refreshV2() {
-    const [accounts, goals, cards, loans, businesses, schedules] = await Promise.all([
-        nui('v2Accounts'), nui('v2Goals'), nui('v2Cards'), nui('v2Loans'), nui('v2Businesses'), nui('v2ScheduledPayments')
+    const [accounts, goals, cards, loans, businesses, schedules, businessLoans] = await Promise.all([
+        nui('v2Accounts'), nui('v2Goals'), nui('v2Cards'), nui('v2Loans'), nui('v2Businesses'), nui('v2ScheduledPayments'), nui('v2BusinessLoans')
     ]);
     const sourceSelect = document.getElementById('v2SourceAccount');
     if (sourceSelect) {
@@ -212,6 +212,8 @@ async function refreshV2() {
         escapeHtml(l.term_months) + ' months</span><b>' + money(l.principal) + '</b>', 'No loan applications yet.');
     listRows('v2Schedules', schedules, p =>
         '<strong>Payment #' + escapeHtml(p.id) + '</strong><span>' + escapeHtml(p.frequency) + ' • ' + escapeHtml(p.status) + ' • ' + escapeHtml(p.next_run_at) + '</span><b>' + money(p.amount) + '</b>', 'No scheduled payments yet.');
+    listRows('v2BusinessLoans', businessLoans, l =>
+        '<strong>Business loan #' + escapeHtml(l.id) + ' • ' + escapeHtml(l.business_name) + '</strong><span>' + escapeHtml(l.status) + ' • ' + escapeHtml(l.term_months) + ' months</span><b>' + money(l.balance_due || l.principal) + '</b>', 'No business loan applications yet.');
     listRows('v2Businesses', businesses, b =>
         '<strong>' + escapeHtml(b.name) + '</strong><span>' + escapeHtml(b.role) + ' • Business #' +
         escapeHtml(b.id) + '</span>', 'No business accounts yet.');
@@ -283,6 +285,15 @@ bindV2('createScheduleButton', 'createScheduledPayment', () => ({
 bindV2('applyLoanButton', 'applyLoan', () => ({
     amount: Number(document.getElementById('loanAmount').value),
     months: Number(document.getElementById('loanMonths').value)
+}));
+bindV2('applyBusinessLoanButton', 'applyBusinessLoan', () => ({
+    businessId: Number(document.getElementById('businessId').value),
+    amount: Number(document.getElementById('businessLoanAmount').value),
+    months: Number(document.getElementById('businessLoanMonths').value)
+}));
+bindV2('repayBusinessLoanButton', 'repayBusinessLoan', () => ({
+    loanId: Number(document.getElementById('businessLoanId').value),
+    amount: Number(document.getElementById('businessLoanRepayment').value)
 }));
 bindV2('createBusinessButton', 'createBusiness', () => ({
     name: document.getElementById('businessName').value.trim()
