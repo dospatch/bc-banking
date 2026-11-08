@@ -83,3 +83,11 @@ CREATE TABLE IF NOT EXISTS bc_banking_v2_scheduled_payments (
  CONSTRAINT fk_bc_v2_schedule_source FOREIGN KEY(source_account_id) REFERENCES bc_banking_v2_accounts(id) ON DELETE RESTRICT,
  CONSTRAINT fk_bc_v2_schedule_dest FOREIGN KEY(destination_account_id) REFERENCES bc_banking_v2_accounts(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS bc_banking_v2_audit (
+ id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, actor_citizenid VARCHAR(50) NOT NULL,
+ action VARCHAR(64) NOT NULL, target_type VARCHAR(32) NOT NULL, target_id VARCHAR(64) NOT NULL,
+ details JSON DEFAULT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ PRIMARY KEY(id), KEY idx_bc_v2_audit_actor(actor_citizenid,created_at),
+ KEY idx_bc_v2_audit_target(target_type,target_id,created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
