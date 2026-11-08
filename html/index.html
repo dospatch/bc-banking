@@ -185,7 +185,8 @@
                             <h2>Bank Cards</h2>
                             <div id="v2Cards" class="v2-list">Loading cards…</div>
                             <input id="cardAccountId" type="number" min="1" placeholder="V2 account ID">
-                            <button id="issueCardButton">Issue Debit Card</button>
+                            <select id="cardType"><option value="physical">Physical-style card</option><option value="virtual">Virtual card</option></select>
+                            <button id="issueCardButton">Issue Card</button>
                             <input id="pinCardId" type="number" min="1" placeholder="Card ID for PIN / replacement">
                             <input id="cardPin" type="password" inputmode="numeric" maxlength="6" placeholder="Set 4–6 digit PIN">
                             <button id="setCardPinButton">Set Card PIN</button>
