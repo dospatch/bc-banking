@@ -46,10 +46,18 @@ local function getWebhookTargets(data)
 
     local function addWebhook(name)
         local url = webhooks[name]
+
+        -- Backward compatibility: use the old server.cfg convars when the
+        -- matching private config.lua value has not been filled in.
+        if url == nil or url == '' then
+            local convarName = name == 'general' and 'bc_banking_webhook' or ('bc_banking_webhook_' .. name)
+            url = GetConvar(convarName, '')
+        end
+
         if url == nil or url == '' then return end
 
         if not isWebhookUrl(url) then
-            print(('[bc-banking] Ignoring invalid Discord webhook URL in Config.DiscordWebhooks.%s.'):format(name))
+            print(('[bc-banking] Ignoring invalid Discord webhook URL for destination %s.'):format(name))
             return
         end
 
