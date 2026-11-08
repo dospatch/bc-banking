@@ -242,12 +242,14 @@ bindV2('v2TransferButton', 'v2Transfer', () => ({
 bindV2('fundAccountButton', 'fundV2Account', () => ({
     accountId: Number(document.getElementById('v2SourceAccount').value),
     amount: Number(document.getElementById('fundAmount').value),
-    source: document.getElementById('fundSource').value
+    source: document.getElementById('fundSource').value,
+    isATM: currentIsATM === true
 }));
 bindV2('withdrawAccountButton', 'withdrawV2Account', () => ({
     accountId: Number(document.getElementById('v2SourceAccount').value),
     amount: Number(document.getElementById('accountWithdrawAmount').value),
-    destination: document.getElementById('withdrawDestination').value
+    destination: document.getElementById('withdrawDestination').value,
+    isATM: currentIsATM === true
 }));
 bindV2('createGoalButton', 'createGoal', () => ({
     name: document.getElementById('goalName').value.trim(),
