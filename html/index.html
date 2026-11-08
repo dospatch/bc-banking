@@ -164,6 +164,12 @@
                             <input id="v2TransferAmount" type="number" min="0.01" step="0.01" placeholder="Transfer amount">
                             <input id="v2TransferDescription" maxlength="100" placeholder="Transfer note">
                             <button id="v2TransferButton">Transfer Between Accounts</button>
+                            <input id="fundAmount" type="number" min="0.01" step="0.01" placeholder="Deposit / fund amount">
+                            <select id="fundSource"><option value="bank">From bank balance</option><option value="cash">From cash</option></select>
+                            <button id="fundAccountButton">Deposit Into Selected Account</button>
+                            <input id="accountWithdrawAmount" type="number" min="0.01" step="0.01" placeholder="Withdrawal amount">
+                            <select id="withdrawDestination"><option value="bank">To bank balance</option><option value="cash">To cash</option></select>
+                            <button id="withdrawAccountButton">Withdraw From Selected Account</button>
                         </div>
                         <div class="panel">
                             <h2>Savings Goals</h2>
