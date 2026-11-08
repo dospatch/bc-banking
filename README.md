@@ -844,13 +844,21 @@ Also check the FiveM client console for JavaScript or NUI errors.
 
 # 📋 Version
 
-**Current Version:** `1.0.0`
+**Current Version:** `1.0.1`
 
 **Release Status:** V1.0 development build — requires FiveM runtime testing before production use
 
 ---
 
 # 📝 Changelog
+
+## v1.0.1
+
+### Updated
+
+* Added category-based multiple Discord webhook destinations configured directly in `config.lua`
+* Kept webhook URL values blank in the public repository so server owners add their own URLs locally
+* Confirmed NUI manifest paths point to `html/css/style.css` and `html/js/app.js`
 
 ## v1.0.0
 
