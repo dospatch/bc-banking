@@ -177,17 +177,3 @@ RegisterNetEvent('bc-banking:v2:repayLoan', function(data)
     TriggerClientEvent('bc-banking:client:v2:refresh', src)
 end)
 
-RegisterCommand('bankloanreview', function(source, args)
-    if source == 0 then
-        print('[bc-banking] Use the in-game /bankloanreview command as an authorized admin.')
-        return
-    end
-    if not isAdmin(source) then return end
-    local loanId = tonumber(args[1])
-    local decision = args[2]
-    if not loanId or (decision ~= 'approve' and decision ~= 'reject') then
-        TriggerClientEvent('bc-banking:client:notify', source, 'Usage: /bankloanreview [loanId] [approve/reject]', 'error')
-        return
-    end
-    TriggerEvent('bc-banking:v2:reviewLoan', { loanId = loanId, decision = decision })
-end, false)
