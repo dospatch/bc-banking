@@ -77,6 +77,100 @@ local statements = {
             UNIQUE KEY uq_bc_v2_idempotency_key (idempotency_key),
             KEY idx_bc_v2_idempotency_actor_time (actor_citizenid, created_at)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ]],
+    [[
+        CREATE TABLE IF NOT EXISTS bc_banking_v2_savings_goals (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            citizenid VARCHAR(50) NOT NULL,
+            name VARCHAR(80) NOT NULL,
+            target_amount DECIMAL(15,2) NOT NULL,
+            current_amount DECIMAL(15,2) NOT NULL DEFAULT 0,
+            status VARCHAR(16) NOT NULL DEFAULT 'active',
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id), KEY idx_bc_v2_goal_owner (citizenid, status)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ]],
+    [[
+        CREATE TABLE IF NOT EXISTS bc_banking_v2_cards (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            citizenid VARCHAR(50) NOT NULL,
+            account_id BIGINT UNSIGNED NOT NULL,
+            card_hash VARCHAR(128) NOT NULL,
+            card_last4 CHAR(4) NOT NULL,
+            card_type VARCHAR(16) NOT NULL DEFAULT 'debit',
+            status VARCHAR(16) NOT NULL DEFAULT 'active',
+            expires_at DATETIME NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id), KEY idx_bc_v2_cards_owner (citizenid, status),
+            CONSTRAINT fk_bc_v2_card_account FOREIGN KEY (account_id) REFERENCES bc_banking_v2_accounts(id) ON DELETE RESTRICT
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ]],
+    [[
+        CREATE TABLE IF NOT EXISTS bc_banking_v2_loans (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            citizenid VARCHAR(50) NOT NULL,
+            principal DECIMAL(15,2) NOT NULL,
+            apr DECIMAL(7,3) NOT NULL DEFAULT 0,
+            term_months INT NOT NULL,
+            monthly_payment DECIMAL(15,2) NOT NULL DEFAULT 0,
+            balance_due DECIMAL(15,2) NOT NULL DEFAULT 0,
+            status VARCHAR(16) NOT NULL DEFAULT 'pending',
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            reviewed_at DATETIME DEFAULT NULL,
+            next_payment_at DATETIME DEFAULT NULL,
+            PRIMARY KEY (id), KEY idx_bc_v2_loan_owner (citizenid, status)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ]],
+    [[
+        CREATE TABLE IF NOT EXISTS bc_banking_v2_businesses (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            name VARCHAR(80) NOT NULL,
+            owner_citizenid VARCHAR(50) NOT NULL,
+            account_id BIGINT UNSIGNED DEFAULT NULL,
+            status VARCHAR(16) NOT NULL DEFAULT 'active',
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id), KEY idx_bc_v2_business_owner (owner_citizenid, status),
+            CONSTRAINT fk_bc_v2_business_account FOREIGN KEY (account_id) REFERENCES bc_banking_v2_accounts(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ]],
+    [[
+        CREATE TABLE IF NOT EXISTS bc_banking_v2_business_members (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            business_id BIGINT UNSIGNED NOT NULL,
+            citizenid VARCHAR(50) NOT NULL,
+            role VARCHAR(24) NOT NULL DEFAULT 'employee',
+            permissions JSON NOT NULL,
+            status VARCHAR(16) NOT NULL DEFAULT 'active',
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id), UNIQUE KEY uq_bc_v2_business_member (business_id, citizenid),
+            CONSTRAINT fk_bc_v2_business_member FOREIGN KEY (business_id) REFERENCES bc_banking_v2_businesses(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ]],
+    [[
+        CREATE TABLE IF NOT EXISTS bc_banking_v2_payroll (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            business_id BIGINT UNSIGNED NOT NULL,
+            employee_citizenid VARCHAR(50) NOT NULL,
+            amount DECIMAL(15,2) NOT NULL,
+            actor_citizenid VARCHAR(50) NOT NULL,
+            status VARCHAR(16) NOT NULL DEFAULT 'paid',
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id), KEY idx_bc_v2_payroll_business (business_id, created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ]],
+    [[
+        CREATE TABLE IF NOT EXISTS bc_banking_v2_audit (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            actor_citizenid VARCHAR(50) NOT NULL,
+            action VARCHAR(64) NOT NULL,
+            target_type VARCHAR(32) NOT NULL,
+            target_id VARCHAR(64) NOT NULL,
+            details JSON DEFAULT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id), KEY idx_bc_v2_audit_actor (actor_citizenid, created_at),
+            KEY idx_bc_v2_audit_target (target_type, target_id, created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     ]]
 }
 
@@ -90,7 +184,7 @@ function Migration.Apply()
             INSERT INTO bc_banking_schema_versions (version, name)
             VALUES (?, ?)
             ON DUPLICATE KEY UPDATE name = VALUES(name)
-        ]], { 2, 'v2_accounts_ledger_idempotency_foundation' })
+        ]], { 2, 'v2_full_banking_schema' })
     end)
 
     if not ok then
