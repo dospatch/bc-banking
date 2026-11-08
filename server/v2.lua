@@ -666,15 +666,30 @@ exports('ChargePlayer', function(source, value, paymentSource, reason, idempoten
     local player = playerFor(source)
     local n = amount(value, tonumber(Config.V2 and Config.V2.MaxPayment) or 1000000)
     if not player or not n then return false, 'invalid_request' end
-    local cid = player.PlayerData.citizenid
-    local idem, idemState = claimIdempotency(cid, 'player.charge', { idempotencyKey=idempotencyKey, amount=n, source=paymentSource, reason=reason })
-    if idemState == 'already_completed' then return true end
-    if not idem then return false, idemState end
+
+    -- Validate the requested tender and current funds before reserving the
+    -- idempotency key. Rejected payment attempts must not leave a permanent
+    -- "processing" key that blocks a later legitimate retry.
     local account = paymentSource == 'cash' and 'cash' or (paymentSource == 'bank' and 'bank' or nil)
     if not account then return false, 'invalid_payment_source' end
     if (tonumber(player.PlayerData.money[account]) or 0) < n then return false, 'insufficient_funds' end
+
+    local cid = player.PlayerData.citizenid
+    local idem, idemState = claimIdempotency(cid, 'player.charge', {
+        idempotencyKey=idempotencyKey,
+        amount=n,
+        source=paymentSource,
+        reason=reason
+    })
+    if idemState == 'already_completed' then return true end
+    if not idem then return false, idemState end
+
     local removed = player.Functions.RemoveMoney(account, n, tostring(reason or 'BC Systems payment'):sub(1,100))
-    if not removed then return false, 'payment_failed' end
+    if not removed then
+        MySQL.update.await("UPDATE bc_banking_v2_idempotency SET status = 'failed' WHERE idempotency_key = ? AND status = 'processing'", { idem })
+        return false, 'payment_failed'
+    end
+
     completeIdempotency(idem, { success=true })
     pcall(function()
         exports['bc-banking']:AddTransaction(cid, 'payment_' .. account, n, tostring(reason or 'BC Systems payment'))
