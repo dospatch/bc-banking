@@ -87,10 +87,26 @@ local function member(accountId, citizenid)
     ]], { accountId, citizenid })
 end
 local function logAudit(actor, action, target, details)
+    local detailsJson = json.encode(details or {})
     MySQL.insert.await([[
         INSERT INTO bc_banking_v2_audit (actor_citizenid, action, target_type, target_id, details)
         VALUES (?, ?, ?, ?, ?)
-    ]], { actor, action, 'account', tostring(target or ''), json.encode(details or {}) })
+    ]], { actor, action, 'account', tostring(target or ''), detailsJson })
+
+    if BCBanking.SendDiscordLog then
+        pcall(function()
+            BCBanking.SendDiscordLog({
+                type = action,
+                title = 'BC-Banking V2 • ' .. tostring(action),
+                color = 0xD97706,
+                fields = {
+                    { name = 'Actor', value = tostring(actor or 'N/A'), inline = true },
+                    { name = 'Target', value = tostring(target or 'N/A'), inline = true },
+                    { name = 'Details', value = tostring(detailsJson):sub(1, 900), inline = false }
+                }
+            })
+        end)
+    end
 end
 
 local function givePhysicalCardItem(src, cardId, last4)
