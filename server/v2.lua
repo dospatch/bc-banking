@@ -533,7 +533,7 @@ RegisterNetEvent('bc-banking:v2:payroll', function(data)
     if idemState == 'already_completed' then return end
     if not idempotencyKey then return end
     local ref = ('pay-%s-%s-%s'):format(os.time(), src, math.random(100000,999999))
-    local success = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ? AND balance >= ?', { value, business.account_id, value })
+    local success = MySQL.update.await("UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ? AND balance >= ? AND status = 'active'", { value, business.account_id, value })
     if not success or success < 1 then
         failIdempotency(idempotencyKey, 'insufficient_business_funds')
         TriggerClientEvent('bc-banking:client:notify', src, 'Insufficient business funds.', 'error'); return
@@ -920,6 +920,7 @@ exports('ChargePlayer', function(source, value, paymentSource, reason, idempoten
 end)
 
 exports('RecordBusinessExpense', function(businessId, actorCitizenid, value, category, description, idempotencyKey)
+    if not BCBanking.V2Ready then return false, 'v2_not_ready' end
     local n = amount(value, tonumber(Config.V2 and Config.V2.MaxPayrollPayment) or 100000)
     if not n then return false, 'invalid_amount' end
     local business = MySQL.single.await([[
@@ -970,14 +971,978 @@ exports('GetAccountStatement', function(accountId, citizenid, fromDate, toDate, 
     if not access then return {} end
     local perms = type(access.permissions) == 'table' and access.permissions or json.decode(access.permissions or '{}') or {}
     if perms.view ~= true and perms.statements ~= true then return {} end
+    local startDate = type(fromDate) == 'string' and fromDate:match('^%d%d%d%d%-%d%d%-%d%d
+end)
+
+
+local function processScheduledPayments()
+    local due = MySQL.query.await([[
+        SELECT * FROM bc_banking_v2_scheduled_payments
+        WHERE status = 'active' AND next_run_at <= CURRENT_TIMESTAMP
+        ORDER BY next_run_at ASC LIMIT 100
+    ]]) or {}
+    for _, payment in ipairs(due) do
+        local claimed = MySQL.update.await([[
+            UPDATE bc_banking_v2_scheduled_payments SET status = 'processing'
+            WHERE id = ? AND status = 'active' AND next_run_at <= CURRENT_TIMESTAMP
+        ]], { payment.id })
+        if claimed and claimed > 0 then
+            local ref = ('sch-%s-%s'):format(payment.id, os.time())
+            local changed = MySQL.update.await([[
+                UPDATE bc_banking_v2_accounts AS src
+                JOIN bc_banking_v2_accounts AS dst ON dst.id = ?
+                SET src.balance = src.balance - ?, dst.balance = dst.balance + ?
+                WHERE src.id = ? AND src.status = 'active' AND dst.status = 'active'
+                  AND src.balance >= ? AND src.id <> dst.id
+            ]], { payment.destination_account_id, payment.amount, payment.amount, payment.source_account_id, payment.amount })
+            if changed and changed >= 2 then
+                local ok = pcall(function()
+                    MySQL.insert.await([[
+                        INSERT INTO bc_banking_v2_ledger
+                        (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description, metadata)
+                        SELECT id, ?, 'scheduled_out', ?, balance, ?, ?, ?
+                        FROM bc_banking_v2_accounts WHERE id = ?
+                    ]], { ref, payment.amount, payment.owner_citizenid, payment.description, json.encode({ payment_id=payment.id }), payment.source_account_id })
+                    MySQL.insert.await([[
+                        INSERT INTO bc_banking_v2_ledger
+                        (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description, metadata)
+                        SELECT id, ?, 'scheduled_in', ?, balance, ?, ?, ?
+                        FROM bc_banking_v2_accounts WHERE id = ?
+                    ]], { ref, payment.amount, payment.owner_citizenid, payment.description, json.encode({ payment_id=payment.id }), payment.destination_account_id })
+                end)
+                if ok then
+                    if payment.frequency == 'weekly' then
+                        MySQL.update.await("UPDATE bc_banking_v2_scheduled_payments SET status = 'active', next_run_at = DATE_ADD(next_run_at, INTERVAL 7 DAY) WHERE id = ?", { payment.id })
+                    elseif payment.frequency == 'monthly' then
+                        MySQL.update.await("UPDATE bc_banking_v2_scheduled_payments SET status = 'active', next_run_at = DATE_ADD(next_run_at, INTERVAL 1 MONTH) WHERE id = ?", { payment.id })
+                    else
+                        MySQL.update.await("UPDATE bc_banking_v2_scheduled_payments SET status = 'completed' WHERE id = ?", { payment.id })
+                    end
+                else
+                    MySQL.update.await([[
+                        UPDATE bc_banking_v2_accounts AS src
+                        JOIN bc_banking_v2_accounts AS dst ON dst.id = ?
+                        SET src.balance = src.balance + ?, dst.balance = dst.balance - ?
+                        WHERE src.id = ?
+                    ]], { payment.destination_account_id, payment.amount, payment.amount, payment.source_account_id })
+                    MySQL.update.await('DELETE FROM bc_banking_v2_ledger WHERE transaction_ref = ?', { ref })
+                    MySQL.update.await("UPDATE bc_banking_v2_scheduled_payments SET status = 'failed' WHERE id = ?", { payment.id })
+                end
+            else
+                MySQL.update.await("UPDATE bc_banking_v2_scheduled_payments SET status = 'failed' WHERE id = ?", { payment.id })
+            end
+        end
+    end
+end
+
+CreateThread(function()
+    Wait(5000)
+    if BCBanking.V2Ready then
+        local ok, err = pcall(function()
+            MySQL.update.await("UPDATE bc_banking_v2_scheduled_payments SET status = 'failed' WHERE status = 'processing'")
+        end)
+        if not ok then print(('[bc-banking] Scheduled payment recovery check failed: %s'):format(tostring(err))) end
+    end
+    while true do
+        Wait(60000)
+        if BCBanking.V2Ready then
+            local ok, err = pcall(processScheduledPayments)
+            if not ok then print(('[bc-banking] Scheduled payment processor failed: %s'):format(tostring(err))) end
+        end
+    end
+end)
+
+
+RegisterNetEvent('bc-banking:v2:setCardPin', function(data)
+    local src, cid = source, cidFor(source)
+    if not cid or type(data) ~= 'table' then return end
+    local cardId, pin = tonumber(data.cardId), tostring(data.pin or '')
+    if not cardId or not pin:match('^%d%d%d%d%d?%d?$') then
+        TriggerClientEvent('bc-banking:client:notify', src, 'PIN must contain 4 to 6 digits.', 'error'); return
+    end
+    local card = MySQL.single.await("SELECT id FROM bc_banking_v2_cards WHERE id = ? AND citizenid = ? AND status = 'active'", { cardId, cid })
+    if not card then return end
+    local salt = tostring(math.random(100000,999999)) .. tostring(os.time()) .. tostring(math.random(100000,999999))
+    local changed = MySQL.query.await([[
+        INSERT INTO bc_banking_v2_card_secrets (card_id, pin_salt, pin_hash, pin_attempts, pin_locked_until)
+        VALUES (?, ?, SHA2(CONCAT(?, ?, ?), 256), 0, NULL)
+        ON DUPLICATE KEY UPDATE pin_salt = VALUES(pin_salt), pin_hash = VALUES(pin_hash),
+            pin_attempts = 0, pin_locked_until = NULL
+    ]], { cardId, salt, pin, salt, tostring(Config.V2 and Config.V2.CardPepper or '') })
+    if changed ~= nil then
+        logAudit(cid, 'card.pin_changed', cardId, {})
+        TriggerClientEvent('bc-banking:client:notify', src, 'Card PIN updated.', 'success')
+    end
+end)
+
+RegisterNetEvent('bc-banking:v2:replaceCard', function(data)
+    local src, cid = source, cidFor(source)
+    local oldId = type(data) == 'table' and tonumber(data.cardId)
+    if not cid or not oldId then return end
+    local card = MySQL.single.await("SELECT account_id, card_type FROM bc_banking_v2_cards WHERE id = ? AND citizenid = ? AND status IN ('active','frozen')", { oldId, cid })
+    if not card then return end
+    local nonce, salt = '', tostring(math.random(100000,999999)) .. tostring(os.time()) .. tostring(math.random(100000,999999))
+    for _ = 1, 32 do nonce = nonce .. tostring(math.random(0,9)) end
+    local last4 = nonce:sub(-4)
+    local newId = MySQL.insert.await([[INSERT INTO bc_banking_v2_cards
+        (citizenid, account_id, card_hash, card_last4, card_type, status, expires_at)
+        VALUES (?, ?, SHA2(CONCAT(?, ?, ?), 256), ?, ?, 'active', DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 4 YEAR))
+    ]], { cid, card.account_id, nonce, salt, tostring(Config.V2 and Config.V2.CardPepper or ''), last4, card.card_type })
+    if not newId then
+        TriggerClientEvent('bc-banking:client:notify', src, 'Replacement card could not be created; your existing card remains unchanged.', 'error')
+        return
+    end
+    local secretOk = pcall(function()
+        MySQL.insert.await('INSERT INTO bc_banking_v2_card_secrets (card_id, pin_salt) VALUES (?, ?)', { newId, salt })
+    end)
+    if not secretOk then
+        MySQL.update.await('DELETE FROM bc_banking_v2_cards WHERE id = ? AND citizenid = ?', { newId, cid })
+        TriggerClientEvent('bc-banking:client:notify', src, 'Replacement card setup failed; your existing card remains unchanged.', 'error')
+        return
+    end
+    local retired = MySQL.update.await("UPDATE bc_banking_v2_cards SET status = 'replaced' WHERE id = ? AND citizenid = ? AND status IN ('active','frozen')", { oldId, cid })
+    if not retired or retired < 1 then
+        MySQL.update.await('DELETE FROM bc_banking_v2_cards WHERE id = ? AND citizenid = ?', { newId, cid })
+        TriggerClientEvent('bc-banking:client:notify', src, 'Your existing card changed before replacement completed. No replacement was issued.', 'error')
+        return
+    end
+    local itemDelivered = card.card_type ~= 'physical' or givePhysicalCardItem(src, newId, last4)
+    logAudit(cid, 'card.replaced', oldId, { new_card_id=newId, last4=last4, card_type=card.card_type, inventory_item_delivered=itemDelivered })
+    local notice = 'Replacement card issued ending in ' .. last4 .. '.'
+    if card.card_type == 'physical' and Config.V2.CardItem and Config.V2.CardItem.Enabled and not itemDelivered then
+        notice = notice .. ' Inventory item delivery failed; check ox_inventory item setup.'
+    end
+    TriggerClientEvent('bc-banking:client:notify', src, notice, itemDelivered and 'success' or 'error')
+    TriggerClientEvent('bc-banking:client:v2:refresh', src)
+end)
+
+exports('VerifyCardPin', function(cardId, citizenid, pin)
+    if not BCBanking.V2Ready then return false end
+    pin = tostring(pin or '')
+    if not tostring(pin):match('^%d%d%d%d%d?%d?$') then return false end
+    local row = MySQL.single.await([[
+        SELECT c.id, s.pin_salt, s.pin_hash, s.pin_attempts, s.pin_locked_until
+        FROM bc_banking_v2_cards c
+        JOIN bc_banking_v2_card_secrets s ON s.card_id = c.id
+        WHERE c.id = ? AND c.citizenid = ? AND c.status = 'active'
+        LIMIT 1
+    ]], { cardId, citizenid })
+    if not row or not row.pin_hash then return false end
+    if row.pin_locked_until and tostring(row.pin_locked_until) > os.date('%Y-%m-%d %H:%M:%S') then return false end
+    local valid = MySQL.scalar.await([[
+        SELECT (pin_hash = SHA2(CONCAT(?, pin_salt, ?), 256))
+        FROM bc_banking_v2_card_secrets WHERE card_id = ?
+    ]], { pin, tostring(Config.V2 and Config.V2.CardPepper or ''), cardId })
+    if tonumber(valid) == 1 then
+        MySQL.update.await('UPDATE bc_banking_v2_card_secrets SET pin_attempts = 0, pin_locked_until = NULL WHERE card_id = ?', { cardId })
+        return true
+    end
+    MySQL.update.await([[
+        UPDATE bc_banking_v2_card_secrets
+        SET pin_attempts = pin_attempts + 1,
+            pin_locked_until = IF(pin_attempts + 1 >= 5, DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 15 MINUTE), pin_locked_until)
+        WHERE card_id = ?
+    ]], { cardId })
+    return false
+end)
+
+
+QBCore.Functions.CreateCallback('bc-banking:v2:getLedger', function(src, cb, accountId)
+    local cid = cidFor(src)
+    if not cid or not tonumber(accountId) then cb({}); return end
+    cb(exports['bc-banking']:GetV2Ledger(tonumber(accountId), cid, 50))
+end)
+
+RegisterNetEvent('bc-banking:v2:fundAccount', function(data)
+    local src, cid = source, cidFor(source)
+    if not cid or type(data) ~= 'table' then return end
+    local accountId, value = tonumber(data.accountId), amount(data.amount, tonumber(Config.MaxDeposit) or 1000000)
+    local sourceType = data.source == 'cash' and 'cash' or (data.source == 'bank' and 'bank' or nil)
+    if not accountId or not value or not sourceType then return end
+    local access = member(accountId, cid)
+    if not access then return end
+    local perms = type(access.permissions) == 'table' and access.permissions or json.decode(access.permissions or '{}') or {}
+    if not perms.deposit then return end
+    local idempotencyKey, idemState = claimIdempotency(cid, 'account.deposit', data)
+    if idemState == 'already_completed' then TriggerClientEvent('bc-banking:client:notify', src, 'This deposit was already processed.', 'success'); return end
+    if not idempotencyKey then TriggerClientEvent('bc-banking:client:notify', src, 'Deposit request rejected: ' .. tostring(idemState), 'error'); return end
+    local player = playerFor(src)
+    if not player then failIdempotency(idempotencyKey, 'player_unavailable'); return end
+    local ok, message = BCBanking.WithPlayerLocks({ cid }, function()
+        if (tonumber(player.PlayerData.money[sourceType]) or 0) < value then return false, 'Insufficient funds.' end
+        if not player.Functions.RemoveMoney(sourceType, value, 'bc-banking-v2-account-deposit') then return false, 'Money could not be removed.' end
+        local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ? AND status = "active"', { value, accountId })
+        if not changed or changed < 1 then
+            player.Functions.AddMoney(sourceType, value, 'bc-banking-v2-account-deposit-refund')
+            return false, 'Deposit failed and was reversed.'
+        end
+        local logged = pcall(function()
+            MySQL.insert.await([[
+                INSERT INTO bc_banking_v2_ledger (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description)
+                SELECT id, ?, 'deposit', ?, balance, ?, ? FROM bc_banking_v2_accounts WHERE id = ?
+            ]], { ('fund-%s-%s'):format(os.time(), math.random(100000,999999)), value, cid, 'Deposit from ' .. sourceType, accountId })
+        end)
+        if not logged then
+            MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ?', { value, accountId })
+            player.Functions.AddMoney(sourceType, value, 'bc-banking-v2-account-deposit-refund')
+            return false, 'Deposit could not be recorded and was reversed.'
+        end
+        completeIdempotency(idempotencyKey, { success=true })
+        return true, 'Account funded.'
+    end)
+    if not ok then failIdempotency(idempotencyKey, message or 'deposit_failed') end
+    TriggerClientEvent('bc-banking:client:notify', src, message or (ok and 'Account funded.' or 'Deposit failed.'), ok and 'success' or 'error')
+    TriggerClientEvent('bc-banking:client:v2:refresh', src)
+end)
+
+RegisterNetEvent('bc-banking:v2:withdrawAccount', function(data)
+    local src, cid = source, cidFor(source)
+    if not cid or type(data) ~= 'table' then return end
+    local accountId, value = tonumber(data.accountId), amount(data.amount, tonumber(Config.MaxWithdrawal) or 1000000)
+    local destination = data.destination == 'cash' and 'cash' or (data.destination == 'bank' and 'bank' or nil)
+    if not accountId or not value or not destination then return end
+    local access = member(accountId, cid)
+    if not access then return end
+    local perms = type(access.permissions) == 'table' and access.permissions or json.decode(access.permissions or '{}') or {}
+    if not perms.withdraw then return end
+    local idempotencyKey, idemState = claimIdempotency(cid, 'account.withdraw', data)
+    if idemState == 'already_completed' then TriggerClientEvent('bc-banking:client:notify', src, 'This withdrawal was already processed.', 'success'); return end
+    if not idempotencyKey then TriggerClientEvent('bc-banking:client:notify', src, 'Withdrawal request rejected: ' .. tostring(idemState), 'error'); return end
+    local player = playerFor(src)
+    if not player then failIdempotency(idempotencyKey, 'player_unavailable'); return end
+    local ok, message = BCBanking.WithPlayerLocks({ cid }, function()
+        local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ? AND status = "active" AND balance >= ?', { value, accountId, value })
+        if not changed or changed < 1 then return false, 'Insufficient account funds.' end
+        if not player.Functions.AddMoney(destination, value, 'bc-banking-v2-account-withdrawal') then
+            MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ?', { value, accountId })
+            return false, 'Withdrawal failed and was reversed.'
+        end
+        local logged = pcall(function()
+            MySQL.insert.await([[
+                INSERT INTO bc_banking_v2_ledger (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description)
+                SELECT id, ?, 'withdrawal', ?, balance, ?, ? FROM bc_banking_v2_accounts WHERE id = ?
+            ]], { ('cashout-%s-%s'):format(os.time(), math.random(100000,999999)), value, cid, 'Withdrawal to ' .. destination, accountId })
+        end)
+        if not logged then
+            player.Functions.RemoveMoney(destination, value, 'bc-banking-v2-account-withdrawal-reversal')
+            MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ?', { value, accountId })
+            return false, 'Withdrawal could not be recorded and was reversed.'
+        end
+        completeIdempotency(idempotencyKey, { success=true })
+        return true, 'Withdrawal completed.'
+    end)
+    if not ok then failIdempotency(idempotencyKey, message or 'withdrawal_failed') end
+    TriggerClientEvent('bc-banking:client:notify', src, message or (ok and 'Withdrawal completed.' or 'Withdrawal failed.'), ok and 'success' or 'error')
+    TriggerClientEvent('bc-banking:client:v2:refresh', src)
+end)
+
+
+RegisterCommand('bcbankaccount', function(src, args)
+    if not BCBanking.V2Ready then print('[bc-banking] V2 database is not ready.'); return end
+    if src ~= 0 and not IsPlayerAceAllowed(src, 'bc-banking.admin') then return end
+    local id, action = tonumber(args[1]), tostring(args[2] or '')
+    if not id or (action ~= 'freeze' and action ~= 'unfreeze' and action ~= 'close' and action ~= 'reopen') then
+        print('Usage: bcbankaccount <accountId> <freeze|unfreeze|close|reopen>'); return
+    end
+    local status = ({ freeze='frozen', unfreeze='active', close='closed', reopen='active' })[action]
+    local account = MySQL.single.await('SELECT id, owner_citizenid, status FROM bc_banking_v2_accounts WHERE id = ?', { id })
+    if not account then print('[bc-banking] V2 account not found.'); return end
+    local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET status = ? WHERE id = ?', { status, id })
+    if changed and changed > 0 then
+        logAudit(src == 0 and 'SERVER_CONSOLE' or (cidFor(src) or 'UNKNOWN'), 'admin.account_' .. action, id, { previous=account.status, current=status })
+        print(('[bc-banking] Account %s status changed to %s.'):format(id, status))
+    end
+end, true)
+
+RegisterCommand('bcbankaudit', function(src, args)
+    if not BCBanking.V2Ready then print('[bc-banking] V2 database is not ready.'); return end
+    if src ~= 0 and not IsPlayerAceAllowed(src, 'bc-banking.admin') then return end
+    local citizenid = tostring(args[1] or '')
+    if #citizenid < 2 then print('Usage: bcbankaudit <citizenid>'); return end
+    local rows = MySQL.query.await([[
+        SELECT actor_citizenid, action, target_type, target_id, details, created_at
+        FROM bc_banking_v2_audit
+        WHERE actor_citizenid = ? OR (target_type = 'account' AND target_id IN (
+            SELECT CAST(id AS CHAR) FROM bc_banking_v2_accounts WHERE owner_citizenid = ?
+        ))
+        ORDER BY id DESC LIMIT 25
+    ]], { citizenid, citizenid }) or {}
+    print(('[bc-banking] Audit records for %s: %s'):format(citizenid, #rows))
+    for _, row in ipairs(rows) do
+        print(('%s | %s | %s:%s | %s'):format(tostring(row.created_at), row.action, row.target_type, row.target_id, tostring(row.details or '{}')))
+    end
+end, true)
+
+exports('SetV2AccountStatus', function(accountId, status, actor)
+    if not BCBanking.V2Ready then return false end
+    if not ({ active=true, frozen=true, closed=true })[status] then return false end
+    local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET status = ? WHERE id = ?', { status, accountId })
+    if changed and changed > 0 then
+        logAudit(tostring(actor or 'SYSTEM'), 'account.status_changed', accountId, { status=status })
+        return true
+    end
+    return false
+end)
+
+
+QBCore.Functions.CreateCallback('bc-banking:v2:getBusinessLoans', function(src, cb)
+    local cid = cidFor(src)
+    if not cid then cb({}); return end
+    cb(MySQL.query.await([[
+        SELECT l.id, l.business_id, b.name AS business_name, l.principal, l.apr,
+               l.term_months, l.monthly_payment, l.balance_due, l.status,
+               l.created_at, l.reviewed_at
+        FROM bc_banking_v2_business_loans l
+        JOIN bc_banking_v2_businesses b ON b.id = l.business_id
+        JOIN bc_banking_v2_business_members m ON m.business_id = b.id
+        WHERE m.citizenid = ? AND m.status = 'active'
+          AND JSON_UNQUOTE(JSON_EXTRACT(m.permissions, '$.view')) = 'true'
+        ORDER BY l.id DESC
+    ]], { cid }) or {})
+end)
+
+RegisterNetEvent('bc-banking:v2:applyBusinessLoan', function(data)
+    local src, cid = source, cidFor(source)
+    if not cid or type(data) ~= 'table' then return end
+    local businessId = tonumber(data.businessId)
+    local principal = amount(data.amount, tonumber(Config.V2 and Config.V2.MaxLoan) or 500000)
+    local months = math.floor(tonumber(data.months) or 0)
+    if not businessId or not principal or months < 1 or months > (tonumber(Config.V2 and Config.V2.MaxLoanMonths) or 24) then return end
+    local owner = MySQL.single.await("SELECT id FROM bc_banking_v2_business_members WHERE business_id = ? AND citizenid = ? AND role = 'owner' AND status = 'active'", { businessId, cid })
+    if not owner then TriggerClientEvent('bc-banking:client:notify', src, 'Only the business owner can apply for a business loan.', 'error'); return end
+    local rate = math.max(0, tonumber(Config.V2 and Config.V2.LoanAPR) or 5)
+    local id, err = BCBanking.WithPlayerLocks({ cid }, function()
+        local open = tonumber(MySQL.scalar.await("SELECT COUNT(*) FROM bc_banking_v2_business_loans WHERE business_id = ? AND status IN ('pending','active','processing')", { businessId }) or 0)
+        if open > 0 then return nil, 'This business already has an open loan.' end
+        return MySQL.insert.await([[
+            INSERT INTO bc_banking_v2_business_loans (business_id, applicant_citizenid, principal, apr, term_months, status)
+            VALUES (?, ?, ?, ?, ?, 'pending')
+        ]], { businessId, cid, principal, rate, months })
+    end)
+    if not id then
+        TriggerClientEvent('bc-banking:client:notify', src, err or 'Business loan application could not be submitted.', 'error')
+        return
+    end
+    logAudit(cid, 'business_loan.applied', id, { business_id=businessId, principal=principal, term=months })
+    TriggerClientEvent('bc-banking:client:notify', src, 'Business loan application submitted.', 'success')
+    TriggerClientEvent('bc-banking:client:v2:refresh', src)
+end)
+
+RegisterNetEvent('bc-banking:v2:repayBusinessLoan', function(data)
+    local src, cid = source, cidFor(source)
+    if not cid or type(data) ~= 'table' then return end
+    local loanId = tonumber(data.loanId)
+    local value = amount(data.amount, 100000000)
+    if not loanId or not value then return end
+    local loan = MySQL.single.await([[
+        SELECT l.*, b.account_id FROM bc_banking_v2_business_loans l
+        JOIN bc_banking_v2_businesses b ON b.id = l.business_id
+        JOIN bc_banking_v2_business_members m ON m.business_id = b.id
+        WHERE l.id = ? AND m.citizenid = ? AND m.role = 'owner'
+          AND m.status = 'active' AND l.status = 'active'
+        LIMIT 1
+    ]], { loanId, cid })
+    if not loan then return end
+    local idempotencyKey, idemState = claimIdempotency(cid, 'business_loan.repayment', data)
+    if idemState == 'already_completed' then return end
+    if not idempotencyKey then return end
+    local due = tonumber(loan.balance_due) or 0
+    if due <= 0 then failIdempotency(idempotencyKey, 'no_outstanding_balance'); return end
+    if value > due then value = due end
+    local debited = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ? AND balance >= ? AND status = "active"', { value, loan.account_id, value })
+    if not debited or debited < 1 then
+        failIdempotency(idempotencyKey, 'insufficient_business_funds')
+        TriggerClientEvent('bc-banking:client:notify', src, 'Insufficient business account funds.', 'error'); return
+    end
+    local remaining = math.max(0, due - value)
+    local changed = MySQL.update.await("UPDATE bc_banking_v2_business_loans SET balance_due = ?, status = ? WHERE id = ? AND status = 'active' AND balance_due >= ?", { remaining, remaining <= 0 and 'paid' or 'active', loanId, value })
+    if not changed or changed < 1 then
+        MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ?', { value, loan.account_id })
+        failIdempotency(idempotencyKey, 'loan_update_failed')
+        return
+    end
+    local balance = MySQL.scalar.await('SELECT balance FROM bc_banking_v2_accounts WHERE id = ?', { loan.account_id })
+    local ledgerOk = pcall(function()
+        MySQL.insert.await([[
+            INSERT INTO bc_banking_v2_ledger (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description, metadata)
+            VALUES (?, ?, 'loan_repayment', ?, ?, ?, 'Business loan repayment', ?)
+        ]], { loan.account_id, ('bizloan-%s-%s-%s'):format(loanId, os.time(), math.random(100000,999999)), value, balance, cid, json.encode({ loan_id=loanId }) })
+    end)
+    if not ledgerOk then
+        MySQL.update.await("UPDATE bc_banking_v2_business_loans SET balance_due = ?, status = 'active' WHERE id = ? AND status IN ('active','paid')", { due, loanId })
+        MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ?', { value, loan.account_id })
+        failIdempotency(idempotencyKey, 'repayment_ledger_failed')
+        return
+    end
+    completeIdempotency(idempotencyKey, { success=true })
+    logAudit(cid, 'business_loan.repayment', loanId, { amount=value, remaining=remaining })
+    TriggerClientEvent('bc-banking:client:notify', src, 'Business loan repayment received.', 'success')
+    TriggerClientEvent('bc-banking:client:v2:refresh', src)
+end)
+
+RegisterCommand('bcbankbusinessloan', function(src, args)
+    if not BCBanking.V2Ready then print('[bc-banking] V2 database is not ready.'); return end
+    if src ~= 0 and not IsPlayerAceAllowed(src, 'bc-banking.admin') then return end
+    local id, decision = tonumber(args[1]), tostring(args[2] or '')
+    if not id or (decision ~= 'approve' and decision ~= 'reject') then
+        print('Usage: bcbankbusinessloan <applicationId> <approve|reject>'); return
+    end
+    local loan = MySQL.single.await("SELECT * FROM bc_banking_v2_business_loans WHERE id = ? AND status = 'pending'", { id })
+    if not loan then print('[bc-banking] Pending business loan not found.'); return end
+    if decision == 'reject' then
+        MySQL.update.await("UPDATE bc_banking_v2_business_loans SET status = 'rejected', reviewed_at = CURRENT_TIMESTAMP WHERE id = ?", { id })
+    else
+        local claimed = MySQL.update.await("UPDATE bc_banking_v2_business_loans SET status = 'processing' WHERE id = ? AND status = 'pending'", { id })
+        if not claimed or claimed < 1 then print('[bc-banking] Business loan application is no longer pending.'); return end
+        local business = MySQL.single.await("SELECT account_id FROM bc_banking_v2_businesses WHERE id = ? AND status = 'active'", { loan.business_id })
+        if not business or not business.account_id then MySQL.update.await("UPDATE bc_banking_v2_business_loans SET status = 'pending' WHERE id = ? AND status = 'processing'", { id }); print('[bc-banking] Business account unavailable; loan left pending.'); return end
+        local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ? AND status = "active"', { loan.principal, business.account_id })
+        if not changed or changed < 1 then MySQL.update.await("UPDATE bc_banking_v2_business_loans SET status = 'pending' WHERE id = ? AND status = 'processing'", { id }); print('[bc-banking] Business loan disbursement failed.'); return end
+        local monthly = loan.principal * (1 + (loan.apr / 100) * (loan.term_months / 12)) / loan.term_months
+        local total = loan.principal * (1 + (loan.apr / 100) * (loan.term_months / 12))
+        MySQL.update.await("UPDATE bc_banking_v2_business_loans SET status = 'active', monthly_payment = ?, balance_due = ?, reviewed_at = CURRENT_TIMESTAMP, next_payment_at = DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 1 MONTH) WHERE id = ? AND status = 'processing'", { monthly, total, id })
+        local finalized = MySQL.scalar.await("SELECT status FROM bc_banking_v2_business_loans WHERE id = ?", { id })
+        if finalized ~= 'active' then
+            MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ?', { loan.principal, business.account_id })
+            MySQL.update.await("UPDATE bc_banking_v2_business_loans SET status = 'pending' WHERE id = ? AND status = 'processing'", { id })
+            print('[bc-banking] Business loan activation failed; disbursement reversed.')
+            return
+        end
+        local balance = MySQL.scalar.await('SELECT balance FROM bc_banking_v2_accounts WHERE id = ?', { business.account_id })
+        local ledgerOk = pcall(function()
+            MySQL.insert.await([[
+                INSERT INTO bc_banking_v2_ledger (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description, metadata)
+                VALUES (?, ?, 'loan_disbursement', ?, ?, ?, 'Business loan disbursement', ?)
+            ]], { business.account_id, ('bizloan-start-%s'):format(id), loan.principal, balance, loan.applicant_citizenid, json.encode({ loan_id=id }) })
+        end)
+        if not ledgerOk then
+            MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ?', { loan.principal, business.account_id })
+            MySQL.update.await("UPDATE bc_banking_v2_business_loans SET status = 'pending', monthly_payment = 0, balance_due = 0, reviewed_at = NULL, next_payment_at = NULL WHERE id = ? AND status = 'active'", { id })
+            print('[bc-banking] Business loan ledger write failed; disbursement was reversed.')
+            return
+        end
+    end
+    logAudit(src == 0 and 'SERVER_CONSOLE' or (cidFor(src) or 'UNKNOWN'), 'business_loan.' .. decision, id, { business_id=loan.business_id, applicant=loan.applicant_citizenid })
+    print(('[bc-banking] Business loan %s %s.'):format(id, decision))
+end, true)
+
+
+QBCore.Functions.CreateCallback('bc-banking:v2:getBusinessExpenses', function(src, cb, businessId)
+    local cid = cidFor(src)
+    businessId = tonumber(businessId)
+    if not cid or not businessId then cb({}); return end
+    local membership = MySQL.single.await("SELECT permissions FROM bc_banking_v2_business_members WHERE business_id = ? AND citizenid = ? AND status = 'active'", { businessId, cid })
+    if not membership then cb({}); return end
+    local permissions = type(membership.permissions) == 'table' and membership.permissions or json.decode(membership.permissions or '{}') or {}
+    if not permissions.view then cb({}); return end
+    cb(MySQL.query.await([[
+        SELECT id, amount, category, description, actor_citizenid, created_at
+        FROM bc_banking_v2_business_expenses WHERE business_id = ?
+        ORDER BY id DESC LIMIT 50
+    ]], { businessId }) or {})
+end)
+
+RegisterNetEvent('bc-banking:v2:businessExpense', function(data)
+    local src, cid = source, cidFor(source)
+    if not cid or type(data) ~= 'table' then return end
+    local ok, reason = exports['bc-banking']:RecordBusinessExpense(
+        tonumber(data.businessId), cid, tonumber(data.amount),
+        tostring(data.category or 'general'), tostring(data.description or 'Business expense'),
+        data.idempotencyKey
+    )
+    TriggerClientEvent('bc-banking:client:notify', src, ok and 'Business expense recorded.' or ('Expense failed: ' .. tostring(reason)), ok and 'success' or 'error')
+    if ok then TriggerClientEvent('bc-banking:client:v2:refresh', src) end
+end)
+) and fromDate or '1000-01-01'
+    local endDate = type(toDate) == 'string' and toDate:match('^%d%d%d%d%-%d%d%-%d%d
+end)
+
+
+local function processScheduledPayments()
+    local due = MySQL.query.await([[
+        SELECT * FROM bc_banking_v2_scheduled_payments
+        WHERE status = 'active' AND next_run_at <= CURRENT_TIMESTAMP
+        ORDER BY next_run_at ASC LIMIT 100
+    ]]) or {}
+    for _, payment in ipairs(due) do
+        local claimed = MySQL.update.await([[
+            UPDATE bc_banking_v2_scheduled_payments SET status = 'processing'
+            WHERE id = ? AND status = 'active' AND next_run_at <= CURRENT_TIMESTAMP
+        ]], { payment.id })
+        if claimed and claimed > 0 then
+            local ref = ('sch-%s-%s'):format(payment.id, os.time())
+            local changed = MySQL.update.await([[
+                UPDATE bc_banking_v2_accounts AS src
+                JOIN bc_banking_v2_accounts AS dst ON dst.id = ?
+                SET src.balance = src.balance - ?, dst.balance = dst.balance + ?
+                WHERE src.id = ? AND src.status = 'active' AND dst.status = 'active'
+                  AND src.balance >= ? AND src.id <> dst.id
+            ]], { payment.destination_account_id, payment.amount, payment.amount, payment.source_account_id, payment.amount })
+            if changed and changed >= 2 then
+                local ok = pcall(function()
+                    MySQL.insert.await([[
+                        INSERT INTO bc_banking_v2_ledger
+                        (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description, metadata)
+                        SELECT id, ?, 'scheduled_out', ?, balance, ?, ?, ?
+                        FROM bc_banking_v2_accounts WHERE id = ?
+                    ]], { ref, payment.amount, payment.owner_citizenid, payment.description, json.encode({ payment_id=payment.id }), payment.source_account_id })
+                    MySQL.insert.await([[
+                        INSERT INTO bc_banking_v2_ledger
+                        (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description, metadata)
+                        SELECT id, ?, 'scheduled_in', ?, balance, ?, ?, ?
+                        FROM bc_banking_v2_accounts WHERE id = ?
+                    ]], { ref, payment.amount, payment.owner_citizenid, payment.description, json.encode({ payment_id=payment.id }), payment.destination_account_id })
+                end)
+                if ok then
+                    if payment.frequency == 'weekly' then
+                        MySQL.update.await("UPDATE bc_banking_v2_scheduled_payments SET status = 'active', next_run_at = DATE_ADD(next_run_at, INTERVAL 7 DAY) WHERE id = ?", { payment.id })
+                    elseif payment.frequency == 'monthly' then
+                        MySQL.update.await("UPDATE bc_banking_v2_scheduled_payments SET status = 'active', next_run_at = DATE_ADD(next_run_at, INTERVAL 1 MONTH) WHERE id = ?", { payment.id })
+                    else
+                        MySQL.update.await("UPDATE bc_banking_v2_scheduled_payments SET status = 'completed' WHERE id = ?", { payment.id })
+                    end
+                else
+                    MySQL.update.await([[
+                        UPDATE bc_banking_v2_accounts AS src
+                        JOIN bc_banking_v2_accounts AS dst ON dst.id = ?
+                        SET src.balance = src.balance + ?, dst.balance = dst.balance - ?
+                        WHERE src.id = ?
+                    ]], { payment.destination_account_id, payment.amount, payment.amount, payment.source_account_id })
+                    MySQL.update.await('DELETE FROM bc_banking_v2_ledger WHERE transaction_ref = ?', { ref })
+                    MySQL.update.await("UPDATE bc_banking_v2_scheduled_payments SET status = 'failed' WHERE id = ?", { payment.id })
+                end
+            else
+                MySQL.update.await("UPDATE bc_banking_v2_scheduled_payments SET status = 'failed' WHERE id = ?", { payment.id })
+            end
+        end
+    end
+end
+
+CreateThread(function()
+    Wait(5000)
+    if BCBanking.V2Ready then
+        local ok, err = pcall(function()
+            MySQL.update.await("UPDATE bc_banking_v2_scheduled_payments SET status = 'failed' WHERE status = 'processing'")
+        end)
+        if not ok then print(('[bc-banking] Scheduled payment recovery check failed: %s'):format(tostring(err))) end
+    end
+    while true do
+        Wait(60000)
+        if BCBanking.V2Ready then
+            local ok, err = pcall(processScheduledPayments)
+            if not ok then print(('[bc-banking] Scheduled payment processor failed: %s'):format(tostring(err))) end
+        end
+    end
+end)
+
+
+RegisterNetEvent('bc-banking:v2:setCardPin', function(data)
+    local src, cid = source, cidFor(source)
+    if not cid or type(data) ~= 'table' then return end
+    local cardId, pin = tonumber(data.cardId), tostring(data.pin or '')
+    if not cardId or not pin:match('^%d%d%d%d%d?%d?$') then
+        TriggerClientEvent('bc-banking:client:notify', src, 'PIN must contain 4 to 6 digits.', 'error'); return
+    end
+    local card = MySQL.single.await("SELECT id FROM bc_banking_v2_cards WHERE id = ? AND citizenid = ? AND status = 'active'", { cardId, cid })
+    if not card then return end
+    local salt = tostring(math.random(100000,999999)) .. tostring(os.time()) .. tostring(math.random(100000,999999))
+    local changed = MySQL.query.await([[
+        INSERT INTO bc_banking_v2_card_secrets (card_id, pin_salt, pin_hash, pin_attempts, pin_locked_until)
+        VALUES (?, ?, SHA2(CONCAT(?, ?, ?), 256), 0, NULL)
+        ON DUPLICATE KEY UPDATE pin_salt = VALUES(pin_salt), pin_hash = VALUES(pin_hash),
+            pin_attempts = 0, pin_locked_until = NULL
+    ]], { cardId, salt, pin, salt, tostring(Config.V2 and Config.V2.CardPepper or '') })
+    if changed ~= nil then
+        logAudit(cid, 'card.pin_changed', cardId, {})
+        TriggerClientEvent('bc-banking:client:notify', src, 'Card PIN updated.', 'success')
+    end
+end)
+
+RegisterNetEvent('bc-banking:v2:replaceCard', function(data)
+    local src, cid = source, cidFor(source)
+    local oldId = type(data) == 'table' and tonumber(data.cardId)
+    if not cid or not oldId then return end
+    local card = MySQL.single.await("SELECT account_id, card_type FROM bc_banking_v2_cards WHERE id = ? AND citizenid = ? AND status IN ('active','frozen')", { oldId, cid })
+    if not card then return end
+    local nonce, salt = '', tostring(math.random(100000,999999)) .. tostring(os.time()) .. tostring(math.random(100000,999999))
+    for _ = 1, 32 do nonce = nonce .. tostring(math.random(0,9)) end
+    local last4 = nonce:sub(-4)
+    local newId = MySQL.insert.await([[INSERT INTO bc_banking_v2_cards
+        (citizenid, account_id, card_hash, card_last4, card_type, status, expires_at)
+        VALUES (?, ?, SHA2(CONCAT(?, ?, ?), 256), ?, ?, 'active', DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 4 YEAR))
+    ]], { cid, card.account_id, nonce, salt, tostring(Config.V2 and Config.V2.CardPepper or ''), last4, card.card_type })
+    if not newId then
+        TriggerClientEvent('bc-banking:client:notify', src, 'Replacement card could not be created; your existing card remains unchanged.', 'error')
+        return
+    end
+    local secretOk = pcall(function()
+        MySQL.insert.await('INSERT INTO bc_banking_v2_card_secrets (card_id, pin_salt) VALUES (?, ?)', { newId, salt })
+    end)
+    if not secretOk then
+        MySQL.update.await('DELETE FROM bc_banking_v2_cards WHERE id = ? AND citizenid = ?', { newId, cid })
+        TriggerClientEvent('bc-banking:client:notify', src, 'Replacement card setup failed; your existing card remains unchanged.', 'error')
+        return
+    end
+    local retired = MySQL.update.await("UPDATE bc_banking_v2_cards SET status = 'replaced' WHERE id = ? AND citizenid = ? AND status IN ('active','frozen')", { oldId, cid })
+    if not retired or retired < 1 then
+        MySQL.update.await('DELETE FROM bc_banking_v2_cards WHERE id = ? AND citizenid = ?', { newId, cid })
+        TriggerClientEvent('bc-banking:client:notify', src, 'Your existing card changed before replacement completed. No replacement was issued.', 'error')
+        return
+    end
+    local itemDelivered = card.card_type ~= 'physical' or givePhysicalCardItem(src, newId, last4)
+    logAudit(cid, 'card.replaced', oldId, { new_card_id=newId, last4=last4, card_type=card.card_type, inventory_item_delivered=itemDelivered })
+    local notice = 'Replacement card issued ending in ' .. last4 .. '.'
+    if card.card_type == 'physical' and Config.V2.CardItem and Config.V2.CardItem.Enabled and not itemDelivered then
+        notice = notice .. ' Inventory item delivery failed; check ox_inventory item setup.'
+    end
+    TriggerClientEvent('bc-banking:client:notify', src, notice, itemDelivered and 'success' or 'error')
+    TriggerClientEvent('bc-banking:client:v2:refresh', src)
+end)
+
+exports('VerifyCardPin', function(cardId, citizenid, pin)
+    if not BCBanking.V2Ready then return false end
+    pin = tostring(pin or '')
+    if not tostring(pin):match('^%d%d%d%d%d?%d?$') then return false end
+    local row = MySQL.single.await([[
+        SELECT c.id, s.pin_salt, s.pin_hash, s.pin_attempts, s.pin_locked_until
+        FROM bc_banking_v2_cards c
+        JOIN bc_banking_v2_card_secrets s ON s.card_id = c.id
+        WHERE c.id = ? AND c.citizenid = ? AND c.status = 'active'
+        LIMIT 1
+    ]], { cardId, citizenid })
+    if not row or not row.pin_hash then return false end
+    if row.pin_locked_until and tostring(row.pin_locked_until) > os.date('%Y-%m-%d %H:%M:%S') then return false end
+    local valid = MySQL.scalar.await([[
+        SELECT (pin_hash = SHA2(CONCAT(?, pin_salt, ?), 256))
+        FROM bc_banking_v2_card_secrets WHERE card_id = ?
+    ]], { pin, tostring(Config.V2 and Config.V2.CardPepper or ''), cardId })
+    if tonumber(valid) == 1 then
+        MySQL.update.await('UPDATE bc_banking_v2_card_secrets SET pin_attempts = 0, pin_locked_until = NULL WHERE card_id = ?', { cardId })
+        return true
+    end
+    MySQL.update.await([[
+        UPDATE bc_banking_v2_card_secrets
+        SET pin_attempts = pin_attempts + 1,
+            pin_locked_until = IF(pin_attempts + 1 >= 5, DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 15 MINUTE), pin_locked_until)
+        WHERE card_id = ?
+    ]], { cardId })
+    return false
+end)
+
+
+QBCore.Functions.CreateCallback('bc-banking:v2:getLedger', function(src, cb, accountId)
+    local cid = cidFor(src)
+    if not cid or not tonumber(accountId) then cb({}); return end
+    cb(exports['bc-banking']:GetV2Ledger(tonumber(accountId), cid, 50))
+end)
+
+RegisterNetEvent('bc-banking:v2:fundAccount', function(data)
+    local src, cid = source, cidFor(source)
+    if not cid or type(data) ~= 'table' then return end
+    local accountId, value = tonumber(data.accountId), amount(data.amount, tonumber(Config.MaxDeposit) or 1000000)
+    local sourceType = data.source == 'cash' and 'cash' or (data.source == 'bank' and 'bank' or nil)
+    if not accountId or not value or not sourceType then return end
+    local access = member(accountId, cid)
+    if not access then return end
+    local perms = type(access.permissions) == 'table' and access.permissions or json.decode(access.permissions or '{}') or {}
+    if not perms.deposit then return end
+    local idempotencyKey, idemState = claimIdempotency(cid, 'account.deposit', data)
+    if idemState == 'already_completed' then TriggerClientEvent('bc-banking:client:notify', src, 'This deposit was already processed.', 'success'); return end
+    if not idempotencyKey then TriggerClientEvent('bc-banking:client:notify', src, 'Deposit request rejected: ' .. tostring(idemState), 'error'); return end
+    local player = playerFor(src)
+    if not player then failIdempotency(idempotencyKey, 'player_unavailable'); return end
+    local ok, message = BCBanking.WithPlayerLocks({ cid }, function()
+        if (tonumber(player.PlayerData.money[sourceType]) or 0) < value then return false, 'Insufficient funds.' end
+        if not player.Functions.RemoveMoney(sourceType, value, 'bc-banking-v2-account-deposit') then return false, 'Money could not be removed.' end
+        local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ? AND status = "active"', { value, accountId })
+        if not changed or changed < 1 then
+            player.Functions.AddMoney(sourceType, value, 'bc-banking-v2-account-deposit-refund')
+            return false, 'Deposit failed and was reversed.'
+        end
+        local logged = pcall(function()
+            MySQL.insert.await([[
+                INSERT INTO bc_banking_v2_ledger (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description)
+                SELECT id, ?, 'deposit', ?, balance, ?, ? FROM bc_banking_v2_accounts WHERE id = ?
+            ]], { ('fund-%s-%s'):format(os.time(), math.random(100000,999999)), value, cid, 'Deposit from ' .. sourceType, accountId })
+        end)
+        if not logged then
+            MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ?', { value, accountId })
+            player.Functions.AddMoney(sourceType, value, 'bc-banking-v2-account-deposit-refund')
+            return false, 'Deposit could not be recorded and was reversed.'
+        end
+        completeIdempotency(idempotencyKey, { success=true })
+        return true, 'Account funded.'
+    end)
+    if not ok then failIdempotency(idempotencyKey, message or 'deposit_failed') end
+    TriggerClientEvent('bc-banking:client:notify', src, message or (ok and 'Account funded.' or 'Deposit failed.'), ok and 'success' or 'error')
+    TriggerClientEvent('bc-banking:client:v2:refresh', src)
+end)
+
+RegisterNetEvent('bc-banking:v2:withdrawAccount', function(data)
+    local src, cid = source, cidFor(source)
+    if not cid or type(data) ~= 'table' then return end
+    local accountId, value = tonumber(data.accountId), amount(data.amount, tonumber(Config.MaxWithdrawal) or 1000000)
+    local destination = data.destination == 'cash' and 'cash' or (data.destination == 'bank' and 'bank' or nil)
+    if not accountId or not value or not destination then return end
+    local access = member(accountId, cid)
+    if not access then return end
+    local perms = type(access.permissions) == 'table' and access.permissions or json.decode(access.permissions or '{}') or {}
+    if not perms.withdraw then return end
+    local idempotencyKey, idemState = claimIdempotency(cid, 'account.withdraw', data)
+    if idemState == 'already_completed' then TriggerClientEvent('bc-banking:client:notify', src, 'This withdrawal was already processed.', 'success'); return end
+    if not idempotencyKey then TriggerClientEvent('bc-banking:client:notify', src, 'Withdrawal request rejected: ' .. tostring(idemState), 'error'); return end
+    local player = playerFor(src)
+    if not player then failIdempotency(idempotencyKey, 'player_unavailable'); return end
+    local ok, message = BCBanking.WithPlayerLocks({ cid }, function()
+        local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ? AND status = "active" AND balance >= ?', { value, accountId, value })
+        if not changed or changed < 1 then return false, 'Insufficient account funds.' end
+        if not player.Functions.AddMoney(destination, value, 'bc-banking-v2-account-withdrawal') then
+            MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ?', { value, accountId })
+            return false, 'Withdrawal failed and was reversed.'
+        end
+        local logged = pcall(function()
+            MySQL.insert.await([[
+                INSERT INTO bc_banking_v2_ledger (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description)
+                SELECT id, ?, 'withdrawal', ?, balance, ?, ? FROM bc_banking_v2_accounts WHERE id = ?
+            ]], { ('cashout-%s-%s'):format(os.time(), math.random(100000,999999)), value, cid, 'Withdrawal to ' .. destination, accountId })
+        end)
+        if not logged then
+            player.Functions.RemoveMoney(destination, value, 'bc-banking-v2-account-withdrawal-reversal')
+            MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ?', { value, accountId })
+            return false, 'Withdrawal could not be recorded and was reversed.'
+        end
+        completeIdempotency(idempotencyKey, { success=true })
+        return true, 'Withdrawal completed.'
+    end)
+    if not ok then failIdempotency(idempotencyKey, message or 'withdrawal_failed') end
+    TriggerClientEvent('bc-banking:client:notify', src, message or (ok and 'Withdrawal completed.' or 'Withdrawal failed.'), ok and 'success' or 'error')
+    TriggerClientEvent('bc-banking:client:v2:refresh', src)
+end)
+
+
+RegisterCommand('bcbankaccount', function(src, args)
+    if not BCBanking.V2Ready then print('[bc-banking] V2 database is not ready.'); return end
+    if src ~= 0 and not IsPlayerAceAllowed(src, 'bc-banking.admin') then return end
+    local id, action = tonumber(args[1]), tostring(args[2] or '')
+    if not id or (action ~= 'freeze' and action ~= 'unfreeze' and action ~= 'close' and action ~= 'reopen') then
+        print('Usage: bcbankaccount <accountId> <freeze|unfreeze|close|reopen>'); return
+    end
+    local status = ({ freeze='frozen', unfreeze='active', close='closed', reopen='active' })[action]
+    local account = MySQL.single.await('SELECT id, owner_citizenid, status FROM bc_banking_v2_accounts WHERE id = ?', { id })
+    if not account then print('[bc-banking] V2 account not found.'); return end
+    local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET status = ? WHERE id = ?', { status, id })
+    if changed and changed > 0 then
+        logAudit(src == 0 and 'SERVER_CONSOLE' or (cidFor(src) or 'UNKNOWN'), 'admin.account_' .. action, id, { previous=account.status, current=status })
+        print(('[bc-banking] Account %s status changed to %s.'):format(id, status))
+    end
+end, true)
+
+RegisterCommand('bcbankaudit', function(src, args)
+    if not BCBanking.V2Ready then print('[bc-banking] V2 database is not ready.'); return end
+    if src ~= 0 and not IsPlayerAceAllowed(src, 'bc-banking.admin') then return end
+    local citizenid = tostring(args[1] or '')
+    if #citizenid < 2 then print('Usage: bcbankaudit <citizenid>'); return end
+    local rows = MySQL.query.await([[
+        SELECT actor_citizenid, action, target_type, target_id, details, created_at
+        FROM bc_banking_v2_audit
+        WHERE actor_citizenid = ? OR (target_type = 'account' AND target_id IN (
+            SELECT CAST(id AS CHAR) FROM bc_banking_v2_accounts WHERE owner_citizenid = ?
+        ))
+        ORDER BY id DESC LIMIT 25
+    ]], { citizenid, citizenid }) or {}
+    print(('[bc-banking] Audit records for %s: %s'):format(citizenid, #rows))
+    for _, row in ipairs(rows) do
+        print(('%s | %s | %s:%s | %s'):format(tostring(row.created_at), row.action, row.target_type, row.target_id, tostring(row.details or '{}')))
+    end
+end, true)
+
+exports('SetV2AccountStatus', function(accountId, status, actor)
+    if not BCBanking.V2Ready then return false end
+    if not ({ active=true, frozen=true, closed=true })[status] then return false end
+    local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET status = ? WHERE id = ?', { status, accountId })
+    if changed and changed > 0 then
+        logAudit(tostring(actor or 'SYSTEM'), 'account.status_changed', accountId, { status=status })
+        return true
+    end
+    return false
+end)
+
+
+QBCore.Functions.CreateCallback('bc-banking:v2:getBusinessLoans', function(src, cb)
+    local cid = cidFor(src)
+    if not cid then cb({}); return end
+    cb(MySQL.query.await([[
+        SELECT l.id, l.business_id, b.name AS business_name, l.principal, l.apr,
+               l.term_months, l.monthly_payment, l.balance_due, l.status,
+               l.created_at, l.reviewed_at
+        FROM bc_banking_v2_business_loans l
+        JOIN bc_banking_v2_businesses b ON b.id = l.business_id
+        JOIN bc_banking_v2_business_members m ON m.business_id = b.id
+        WHERE m.citizenid = ? AND m.status = 'active'
+          AND JSON_UNQUOTE(JSON_EXTRACT(m.permissions, '$.view')) = 'true'
+        ORDER BY l.id DESC
+    ]], { cid }) or {})
+end)
+
+RegisterNetEvent('bc-banking:v2:applyBusinessLoan', function(data)
+    local src, cid = source, cidFor(source)
+    if not cid or type(data) ~= 'table' then return end
+    local businessId = tonumber(data.businessId)
+    local principal = amount(data.amount, tonumber(Config.V2 and Config.V2.MaxLoan) or 500000)
+    local months = math.floor(tonumber(data.months) or 0)
+    if not businessId or not principal or months < 1 or months > (tonumber(Config.V2 and Config.V2.MaxLoanMonths) or 24) then return end
+    local owner = MySQL.single.await("SELECT id FROM bc_banking_v2_business_members WHERE business_id = ? AND citizenid = ? AND role = 'owner' AND status = 'active'", { businessId, cid })
+    if not owner then TriggerClientEvent('bc-banking:client:notify', src, 'Only the business owner can apply for a business loan.', 'error'); return end
+    local rate = math.max(0, tonumber(Config.V2 and Config.V2.LoanAPR) or 5)
+    local id, err = BCBanking.WithPlayerLocks({ cid }, function()
+        local open = tonumber(MySQL.scalar.await("SELECT COUNT(*) FROM bc_banking_v2_business_loans WHERE business_id = ? AND status IN ('pending','active','processing')", { businessId }) or 0)
+        if open > 0 then return nil, 'This business already has an open loan.' end
+        return MySQL.insert.await([[
+            INSERT INTO bc_banking_v2_business_loans (business_id, applicant_citizenid, principal, apr, term_months, status)
+            VALUES (?, ?, ?, ?, ?, 'pending')
+        ]], { businessId, cid, principal, rate, months })
+    end)
+    if not id then
+        TriggerClientEvent('bc-banking:client:notify', src, err or 'Business loan application could not be submitted.', 'error')
+        return
+    end
+    logAudit(cid, 'business_loan.applied', id, { business_id=businessId, principal=principal, term=months })
+    TriggerClientEvent('bc-banking:client:notify', src, 'Business loan application submitted.', 'success')
+    TriggerClientEvent('bc-banking:client:v2:refresh', src)
+end)
+
+RegisterNetEvent('bc-banking:v2:repayBusinessLoan', function(data)
+    local src, cid = source, cidFor(source)
+    if not cid or type(data) ~= 'table' then return end
+    local loanId = tonumber(data.loanId)
+    local value = amount(data.amount, 100000000)
+    if not loanId or not value then return end
+    local loan = MySQL.single.await([[
+        SELECT l.*, b.account_id FROM bc_banking_v2_business_loans l
+        JOIN bc_banking_v2_businesses b ON b.id = l.business_id
+        JOIN bc_banking_v2_business_members m ON m.business_id = b.id
+        WHERE l.id = ? AND m.citizenid = ? AND m.role = 'owner'
+          AND m.status = 'active' AND l.status = 'active'
+        LIMIT 1
+    ]], { loanId, cid })
+    if not loan then return end
+    local idempotencyKey, idemState = claimIdempotency(cid, 'business_loan.repayment', data)
+    if idemState == 'already_completed' then return end
+    if not idempotencyKey then return end
+    local due = tonumber(loan.balance_due) or 0
+    if due <= 0 then failIdempotency(idempotencyKey, 'no_outstanding_balance'); return end
+    if value > due then value = due end
+    local debited = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ? AND balance >= ? AND status = "active"', { value, loan.account_id, value })
+    if not debited or debited < 1 then
+        failIdempotency(idempotencyKey, 'insufficient_business_funds')
+        TriggerClientEvent('bc-banking:client:notify', src, 'Insufficient business account funds.', 'error'); return
+    end
+    local remaining = math.max(0, due - value)
+    local changed = MySQL.update.await("UPDATE bc_banking_v2_business_loans SET balance_due = ?, status = ? WHERE id = ? AND status = 'active' AND balance_due >= ?", { remaining, remaining <= 0 and 'paid' or 'active', loanId, value })
+    if not changed or changed < 1 then
+        MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ?', { value, loan.account_id })
+        failIdempotency(idempotencyKey, 'loan_update_failed')
+        return
+    end
+    local balance = MySQL.scalar.await('SELECT balance FROM bc_banking_v2_accounts WHERE id = ?', { loan.account_id })
+    local ledgerOk = pcall(function()
+        MySQL.insert.await([[
+            INSERT INTO bc_banking_v2_ledger (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description, metadata)
+            VALUES (?, ?, 'loan_repayment', ?, ?, ?, 'Business loan repayment', ?)
+        ]], { loan.account_id, ('bizloan-%s-%s-%s'):format(loanId, os.time(), math.random(100000,999999)), value, balance, cid, json.encode({ loan_id=loanId }) })
+    end)
+    if not ledgerOk then
+        MySQL.update.await("UPDATE bc_banking_v2_business_loans SET balance_due = ?, status = 'active' WHERE id = ? AND status IN ('active','paid')", { due, loanId })
+        MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ?', { value, loan.account_id })
+        failIdempotency(idempotencyKey, 'repayment_ledger_failed')
+        return
+    end
+    completeIdempotency(idempotencyKey, { success=true })
+    logAudit(cid, 'business_loan.repayment', loanId, { amount=value, remaining=remaining })
+    TriggerClientEvent('bc-banking:client:notify', src, 'Business loan repayment received.', 'success')
+    TriggerClientEvent('bc-banking:client:v2:refresh', src)
+end)
+
+RegisterCommand('bcbankbusinessloan', function(src, args)
+    if not BCBanking.V2Ready then print('[bc-banking] V2 database is not ready.'); return end
+    if src ~= 0 and not IsPlayerAceAllowed(src, 'bc-banking.admin') then return end
+    local id, decision = tonumber(args[1]), tostring(args[2] or '')
+    if not id or (decision ~= 'approve' and decision ~= 'reject') then
+        print('Usage: bcbankbusinessloan <applicationId> <approve|reject>'); return
+    end
+    local loan = MySQL.single.await("SELECT * FROM bc_banking_v2_business_loans WHERE id = ? AND status = 'pending'", { id })
+    if not loan then print('[bc-banking] Pending business loan not found.'); return end
+    if decision == 'reject' then
+        MySQL.update.await("UPDATE bc_banking_v2_business_loans SET status = 'rejected', reviewed_at = CURRENT_TIMESTAMP WHERE id = ?", { id })
+    else
+        local claimed = MySQL.update.await("UPDATE bc_banking_v2_business_loans SET status = 'processing' WHERE id = ? AND status = 'pending'", { id })
+        if not claimed or claimed < 1 then print('[bc-banking] Business loan application is no longer pending.'); return end
+        local business = MySQL.single.await("SELECT account_id FROM bc_banking_v2_businesses WHERE id = ? AND status = 'active'", { loan.business_id })
+        if not business or not business.account_id then MySQL.update.await("UPDATE bc_banking_v2_business_loans SET status = 'pending' WHERE id = ? AND status = 'processing'", { id }); print('[bc-banking] Business account unavailable; loan left pending.'); return end
+        local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ? AND status = "active"', { loan.principal, business.account_id })
+        if not changed or changed < 1 then MySQL.update.await("UPDATE bc_banking_v2_business_loans SET status = 'pending' WHERE id = ? AND status = 'processing'", { id }); print('[bc-banking] Business loan disbursement failed.'); return end
+        local monthly = loan.principal * (1 + (loan.apr / 100) * (loan.term_months / 12)) / loan.term_months
+        local total = loan.principal * (1 + (loan.apr / 100) * (loan.term_months / 12))
+        MySQL.update.await("UPDATE bc_banking_v2_business_loans SET status = 'active', monthly_payment = ?, balance_due = ?, reviewed_at = CURRENT_TIMESTAMP, next_payment_at = DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 1 MONTH) WHERE id = ? AND status = 'processing'", { monthly, total, id })
+        local finalized = MySQL.scalar.await("SELECT status FROM bc_banking_v2_business_loans WHERE id = ?", { id })
+        if finalized ~= 'active' then
+            MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ?', { loan.principal, business.account_id })
+            MySQL.update.await("UPDATE bc_banking_v2_business_loans SET status = 'pending' WHERE id = ? AND status = 'processing'", { id })
+            print('[bc-banking] Business loan activation failed; disbursement reversed.')
+            return
+        end
+        local balance = MySQL.scalar.await('SELECT balance FROM bc_banking_v2_accounts WHERE id = ?', { business.account_id })
+        local ledgerOk = pcall(function()
+            MySQL.insert.await([[
+                INSERT INTO bc_banking_v2_ledger (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description, metadata)
+                VALUES (?, ?, 'loan_disbursement', ?, ?, ?, 'Business loan disbursement', ?)
+            ]], { business.account_id, ('bizloan-start-%s'):format(id), loan.principal, balance, loan.applicant_citizenid, json.encode({ loan_id=id }) })
+        end)
+        if not ledgerOk then
+            MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ?', { loan.principal, business.account_id })
+            MySQL.update.await("UPDATE bc_banking_v2_business_loans SET status = 'pending', monthly_payment = 0, balance_due = 0, reviewed_at = NULL, next_payment_at = NULL WHERE id = ? AND status = 'active'", { id })
+            print('[bc-banking] Business loan ledger write failed; disbursement was reversed.')
+            return
+        end
+    end
+    logAudit(src == 0 and 'SERVER_CONSOLE' or (cidFor(src) or 'UNKNOWN'), 'business_loan.' .. decision, id, { business_id=loan.business_id, applicant=loan.applicant_citizenid })
+    print(('[bc-banking] Business loan %s %s.'):format(id, decision))
+end, true)
+
+
+QBCore.Functions.CreateCallback('bc-banking:v2:getBusinessExpenses', function(src, cb, businessId)
+    local cid = cidFor(src)
+    businessId = tonumber(businessId)
+    if not cid or not businessId then cb({}); return end
+    local membership = MySQL.single.await("SELECT permissions FROM bc_banking_v2_business_members WHERE business_id = ? AND citizenid = ? AND status = 'active'", { businessId, cid })
+    if not membership then cb({}); return end
+    local permissions = type(membership.permissions) == 'table' and membership.permissions or json.decode(membership.permissions or '{}') or {}
+    if not permissions.view then cb({}); return end
+    cb(MySQL.query.await([[
+        SELECT id, amount, category, description, actor_citizenid, created_at
+        FROM bc_banking_v2_business_expenses WHERE business_id = ?
+        ORDER BY id DESC LIMIT 50
+    ]], { businessId }) or {})
+end)
+
+RegisterNetEvent('bc-banking:v2:businessExpense', function(data)
+    local src, cid = source, cidFor(source)
+    if not cid or type(data) ~= 'table' then return end
+    local ok, reason = exports['bc-banking']:RecordBusinessExpense(
+        tonumber(data.businessId), cid, tonumber(data.amount),
+        tostring(data.category or 'general'), tostring(data.description or 'Business expense'),
+        data.idempotencyKey
+    )
+    TriggerClientEvent('bc-banking:client:notify', src, ok and 'Business expense recorded.' or ('Expense failed: ' .. tostring(reason)), ok and 'success' or 'error')
+    if ok then TriggerClientEvent('bc-banking:client:v2:refresh', src) end
+end)
+) and toDate or '9999-12-31'
     return MySQL.query.await([[
         SELECT transaction_ref, entry_type, amount, balance_after, description, created_at
         FROM bc_banking_v2_ledger
-        WHERE account_id = ?
-          AND (? IS NULL OR created_at >= ?)
-          AND (? IS NULL OR created_at <= ?)
+        WHERE account_id = ? AND created_at >= ? AND created_at < DATE_ADD(?, INTERVAL 1 DAY)
         ORDER BY id DESC LIMIT ?
-    ]], { accountId, fromDate, fromDate, toDate, toDate, math.max(1, math.min(tonumber(limit) or 100, 500)) }) or {}
+    ]], { accountId, startDate, endDate, math.max(1, math.min(tonumber(limit) or 100, 500)) }) or {}
 end)
 
 
