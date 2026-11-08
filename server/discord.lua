@@ -14,12 +14,11 @@ local function isWebhookUrl(url)
 end
 
 local function getCategory(transactionType)
-    if transactionType == 'deposit' then return 'deposits' end
-    if transactionType == 'withdraw' then return 'withdrawals' end
-    if transactionType == 'transfer_out' or transactionType == 'transfer_in' then
-        return 'transfers'
-    end
-    if transactionType == 'transfer_fee' then return 'fees' end
+    local kind = tostring(transactionType or ''):lower()
+    if kind:find('fee', 1, true) then return 'fees' end
+    if kind:find('transfer', 1, true) then return 'transfers' end
+    if kind:find('deposit', 1, true) or kind:find('fund', 1, true) then return 'deposits' end
+    if kind:find('withdraw', 1, true) or kind:find('repayment', 1, true) then return 'withdrawals' end
     return 'other'
 end
 
@@ -91,7 +90,7 @@ function BCBanking.SendDiscordLog(data)
             title = clean(data.title or 'BC-Banking Event', 256),
             color = tonumber(data.color) or 0xD97706,
             fields = fields,
-            footer = { text = 'BCGAMING • BC-Banking V1' },
+            footer = { text = 'BCGAMING • BC-Banking' },
             timestamp = os.date('!%Y-%m-%dT%H:%M:%SZ')
         }}
     }
