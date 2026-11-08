@@ -845,14 +845,28 @@ exports('RecordBusinessExpense', function(businessId, actorCitizenid, value, cat
     if not idem then return false, idemState end
     local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ? AND balance >= ? AND status = "active"', { n, business.account_id, n })
     if not changed or changed < 1 then failIdempotency(idem, 'insufficient_funds'); return false, 'insufficient_funds' end
-    local ok = pcall(function()
-        MySQL.insert.await('INSERT INTO bc_banking_v2_business_expenses (business_id, actor_citizenid, amount, category, description) VALUES (?, ?, ?, ?, ?)', { businessId, actorCitizenid, n, tostring(category or 'general'):sub(1,48), tostring(description or 'Business expense'):sub(1,255) })
-        MySQL.insert.await([[
-            INSERT INTO bc_banking_v2_ledger (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description)
-            SELECT id, ?, 'business_expense', ?, balance, ?, ? FROM bc_banking_v2_accounts WHERE id = ?
-        ]], { ('exp-%s-%s'):format(os.time(), math.random(100000,999999)), -n, actorCitizenid, tostring(description or 'Business expense'):sub(1,255), business.account_id })
+    local ok, committed = pcall(function()
+        return MySQL.transaction.await({
+            {
+                query = [[
+                    INSERT INTO bc_banking_v2_business_expenses
+                    (business_id, actor_citizenid, amount, category, description)
+                    VALUES (?, ?, ?, ?, ?)
+                ]],
+                values = { businessId, actorCitizenid, n, tostring(category or 'general'):sub(1,48), tostring(description or 'Business expense'):sub(1,255) }
+            },
+            {
+                query = [[
+                    INSERT INTO bc_banking_v2_ledger
+                    (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description)
+                    SELECT id, ?, 'business_expense', ?, balance, ?, ?
+                    FROM bc_banking_v2_accounts WHERE id = ?
+                ]],
+                values = { ('exp-%s-%s'):format(os.time(), math.random(100000,999999)), -n, actorCitizenid, tostring(description or 'Business expense'):sub(1,255), business.account_id }
+            }
+        })
     end)
-    if not ok then
+    if not ok or committed ~= true then
         MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ?', { n, business.account_id })
         failIdempotency(idem, 'recording_failed')
         return false, 'recording_failed'
