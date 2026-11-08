@@ -1,12 +1,12 @@
 local QBCore = exports['qb-core']:GetCoreObject()
 
 local function generateAccountNumber()
+    local length = math.max(6, math.min(20, math.floor(tonumber(Config.AccountNumberLength) or 10)))
     local accountNumber
 
     repeat
         accountNumber = ''
-
-        for _ = 1, Config.AccountNumberLength do
+        for _ = 1, length do
             accountNumber = accountNumber .. tostring(math.random(0, 9))
         end
 
@@ -14,7 +14,7 @@ local function generateAccountNumber()
             'SELECT COUNT(*) FROM bc_banking_accounts WHERE account_number = ?',
             { accountNumber }
         )
-    until exists == 0
+    until tonumber(exists) == 0
 
     return accountNumber
 end
@@ -34,11 +34,12 @@ exports('GetAccountByNumber', function(accountNumber)
 end)
 
 exports('CreateAccount', function(Player)
-    if not Player then
+    if not Player or not Player.PlayerData or not Player.PlayerData.citizenid then
         return false
     end
 
     local citizenid = Player.PlayerData.citizenid
+    local currentBank = tonumber(Player.PlayerData.money and Player.PlayerData.money.bank) or 0
 
     local existing = MySQL.single.await(
         'SELECT * FROM bc_banking_accounts WHERE citizenid = ? LIMIT 1',
@@ -46,41 +47,68 @@ exports('CreateAccount', function(Player)
     )
 
     if existing then
-        local currentBank = tonumber(Player.PlayerData.money.bank) or 0
         MySQL.update.await(
             'UPDATE bc_banking_accounts SET balance = ? WHERE citizenid = ?',
-            { currentBank, citizenid }
+            { BCBanking.RoundMoney(currentBank), citizenid }
         )
         existing.balance = currentBank
         return existing
     end
 
-    local accountNumber = generateAccountNumber()
-    local bankBalance = tonumber(Player.PlayerData.money.bank) or 0
+    -- The unique citizen ID and account number indexes are the final authority.
+    -- Re-read after a failed insert so concurrent PlayerLoaded/dashboard requests
+    -- converge on the same account instead of failing the resource callback.
+    for attempt = 1, 10 do
+        local accountNumber = generateAccountNumber()
+        local inserted, insertResult = pcall(function()
+            return MySQL.insert.await(
+                [[
+                    INSERT INTO bc_banking_accounts
+                    (citizenid, account_number, account_type, balance)
+                    VALUES (?, ?, ?, ?)
+                ]],
+                {
+                    citizenid,
+                    accountNumber,
+                    'checking',
+                    BCBanking.RoundMoney(currentBank)
+                }
+            )
+        end)
 
-    MySQL.insert.await(
-        [[
-            INSERT INTO bc_banking_accounts
-            (citizenid, account_number, account_type, balance)
-            VALUES (?, ?, ?, ?)
-        ]],
-        {
-            citizenid,
-            accountNumber,
-            'checking',
-            bankBalance
-        }
-    )
+        if inserted and insertResult then
+            return MySQL.single.await(
+                'SELECT * FROM bc_banking_accounts WHERE citizenid = ? LIMIT 1',
+                { citizenid }
+            )
+        end
 
-    return MySQL.single.await(
-        'SELECT * FROM bc_banking_accounts WHERE citizenid = ? LIMIT 1',
-        { citizenid }
-    )
+        existing = MySQL.single.await(
+            'SELECT * FROM bc_banking_accounts WHERE citizenid = ? LIMIT 1',
+            { citizenid }
+        )
+
+        if existing then
+            return existing
+        end
+
+        if not inserted then
+            print(('[bc-banking] Account creation attempt %s failed: %s'):format(attempt, tostring(insertResult)))
+        end
+    end
+
+    print(('[bc-banking] CRITICAL: unable to create account after 10 attempts for citizen ID %s'):format(citizenid))
+    return false
 end)
 
 AddEventHandler('QBCore:Server:PlayerLoaded', function(Player)
     if Player then
-        exports['bc-banking']:CreateAccount(Player)
+        local ok, result = pcall(function()
+            return exports['bc-banking']:CreateAccount(Player)
+        end)
+        if not ok or not result then
+            print(('[bc-banking] Account initialization failed: %s'):format(tostring(result)))
+        end
     end
 end)
 
