@@ -25,7 +25,7 @@
 - Test zero APR and cent rounding.
 
 ## Cards
-- Issue, freeze, unfreeze and replace cards.
+- Issue physical-style and virtual cards, freeze, unfreeze and replace each type; replacement must preserve card type.
 - Set and verify 4-, 5- and 6-digit PINs.
 - Wrong PIN increments attempts; fifth failure locks for 15 minutes.
 - Confirm PIN/full token never appears in UI, plaintext DB, Discord or console.
