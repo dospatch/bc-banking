@@ -25,8 +25,9 @@ local statement = exports['bc-banking']:GetAccountStatement(accountId, citizenid
 
 ### Deposit / withdraw within V2 account
 ~~~lua
-local ok, reason = exports['bc-banking']:DepositToV2Account(accountId, citizenid, 250.00, 'BC Systems deposit')
-local withdrawn, why = exports['bc-banking']:WithdrawFromV2Account(accountId, citizenid, 100.00, 'BC Systems withdrawal')
+-- Supply a unique key for each logical operation (8–80 characters).
+local ok, reason = exports['bc-banking']:DepositToV2Account(accountId, citizenid, 250.00, 'BC Systems deposit', 'dealership-deposit-12345')
+local withdrawn, why = exports['bc-banking']:WithdrawFromV2Account(accountId, citizenid, 100.00, 'BC Systems withdrawal', 'dealership-withdraw-12345')
 ~~~
 These exports operate on V2 ledger balances; they do not debit or credit QBCore cash/bank.
 
