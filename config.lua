@@ -9,6 +9,8 @@ Config.V2 = {
     MaxLoan = 500000,
     MaxLoanMonths = 24,
     LoanAPR = 5.0,
+    SavingsAPR = 1.0,
+    MaxPayment = 1000000,
     MaxPayrollPayment = 100000,
     InternalTransferFee = 0,
     -- Optional secret used only as additional entropy for card verification hashes.
