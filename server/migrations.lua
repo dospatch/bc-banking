@@ -216,6 +216,18 @@ local statements = {
             PRIMARY KEY (id), KEY idx_bc_v2_expense_business (business_id, created_at),
             CONSTRAINT fk_bc_v2_expense_business FOREIGN KEY (business_id) REFERENCES bc_banking_v2_businesses(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ]],
+    [[
+        CREATE TABLE IF NOT EXISTS bc_banking_v2_card_secrets (
+            card_id BIGINT UNSIGNED NOT NULL,
+            pin_salt VARCHAR(64) NOT NULL,
+            pin_hash CHAR(64) DEFAULT NULL,
+            pin_attempts INT NOT NULL DEFAULT 0,
+            pin_locked_until DATETIME DEFAULT NULL,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (card_id),
+            CONSTRAINT fk_bc_v2_card_secret FOREIGN KEY (card_id) REFERENCES bc_banking_v2_cards(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     ]]
 }
 
@@ -229,7 +241,7 @@ function Migration.Apply()
             INSERT INTO bc_banking_schema_versions (version, name)
             VALUES (?, ?)
             ON DUPLICATE KEY UPDATE name = VALUES(name)
-        ]], { 2, 'v2_full_banking_schema_2' })
+        ]], { 2, 'v2_full_banking_schema_3' })
     end)
 
     if not ok then
