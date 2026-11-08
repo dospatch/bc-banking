@@ -154,7 +154,14 @@ RegisterNetEvent('bc-banking:server:transfer', function(targetAccountNumber, val
             return exports['bc-banking']:AddTransaction(receiverAccount.citizenid, 'transfer_in', amount, 'Bank transfer received', senderAccount.account_number)
         end)
 
-        if not outOk or not outId or not inOk or not inId then
+        local feeOk, feeId = true, true
+        if fee > 0 then
+            feeOk, feeId = pcall(function()
+                return exports['bc-banking']:AddTransaction(senderCid, 'transfer_fee', fee, 'Bank transfer fee', receiverAccount.account_number)
+            end)
+        end
+
+        if not outOk or not outId or not inOk or not inId or not feeOk or not feeId then
             print(('[bc-banking] Transfer completed but transaction log insert failed. Sender=%s Receiver=%s'):format(senderCid, receiverAccount.citizenid))
         end
 
