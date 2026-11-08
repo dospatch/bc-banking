@@ -739,20 +739,16 @@ RegisterNetEvent('bc-banking:v2:repayLoan', function(data)
         failIdempotency(idempotencyKey, 'loan_update_failed')
         return
     end
-    local ledgerOk = pcall(function()
-        MySQL.insert.await([[
-            INSERT INTO bc_banking_v2_audit (actor_citizenid, action, target_type, target_id, details)
-            VALUES (?, 'loan.repayment_recorded', 'loan', ?, ?)
-        ]], { cid, tostring(id), json.encode({ amount=value, remaining=remaining }) })
+    local auditOk = pcall(function()
+        logAudit(cid, 'loan.repayment', id, { amount=value, remaining=remaining })
     end)
-    if not ledgerOk then
+    if not auditOk then
         MySQL.update.await("UPDATE bc_banking_v2_loans SET balance_due = ?, status = 'active', next_payment_at = DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 1 MONTH) WHERE id = ? AND citizenid = ?", { due, id, cid })
         player.Functions.AddMoney('bank', value, 'bc-banking-loan-repayment-refund')
         failIdempotency(idempotencyKey, 'repayment_audit_failed')
         return
     end
     completeIdempotency(idempotencyKey, { success=true })
-    logAudit(cid, 'loan.repayment', id, { amount=value, remaining=remaining })
     TriggerClientEvent('bc-banking:client:notify', src, 'Loan repayment received.', 'success')
     TriggerClientEvent('bc-banking:client:v2:refresh', src)
 end)
