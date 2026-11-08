@@ -80,6 +80,7 @@ RegisterNUICallback('v2Cards', function(_, cb) v2Callback('getCards', nil, cb) e
 RegisterNUICallback('v2Loans', function(_, cb) v2Callback('getLoans', nil, cb) end)
 RegisterNUICallback('v2Businesses', function(_, cb) v2Callback('getBusinesses', nil, cb) end)
 RegisterNUICallback('v2BusinessLoans', function(_, cb) v2Callback('getBusinessLoans', nil, cb) end)
+RegisterNUICallback('v2BusinessExpenses', function(data, cb) v2Callback('getBusinessExpenses', data and data.businessId, cb) end)
 RegisterNUICallback('v2ScheduledPayments', function(_, cb) v2Callback('getScheduledPayments', nil, cb) end)
 RegisterNUICallback('v2Ledger', function(data, cb) v2Callback('getLedger', data and data.accountId, cb) end)
 
@@ -96,6 +97,7 @@ local v2Events = {
     setCardStatus = 'bc-banking:v2:setCardStatus',
     applyLoan = 'bc-banking:v2:applyLoan',
     createBusiness = 'bc-banking:v2:createBusiness',
+    businessExpense = 'bc-banking:v2:businessExpense',
     applyBusinessLoan = 'bc-banking:v2:applyBusinessLoan',
     repayBusinessLoan = 'bc-banking:v2:repayBusinessLoan',
     addBusinessEmployee = 'bc-banking:v2:addBusinessEmployee',
