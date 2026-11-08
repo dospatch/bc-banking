@@ -31,6 +31,7 @@ server_scripts {
     'server/main.lua',
     'server/discord.lua',
     'server/migrations.lua',
+    'server/v2.lua',
     'server/locks.lua',
     'server/accounts.lua',
     'server/transactions.lua',
