@@ -7,7 +7,7 @@
 - Record V1 account/transaction counts and sample balances.
 - Confirm QBCore, oxmysql, ox_target versions and `players.money` format.
 - Set a private `Config.V2.CardPepper`; keep Discord webhook templates blank.
-- Verify migration version 3 and all V2 tables.
+- Verify migration version 4 and all V2 tables.
 - Confirm V1 tables and rows remain unchanged.
 
 ## Personal accounts and ledger
@@ -37,7 +37,7 @@
 - Verify online/offline disbursement against the deployed QBCore JSON schema.
 - Repay partially and fully; cap overpayment at remaining balance.
 
-## Business
+## Business and business loans
 - Create business and linked account.
 - Add/update employee permissions and test each permission independently.
 - Confirm employees cannot gain owner/manage rights.
