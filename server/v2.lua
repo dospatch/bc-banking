@@ -480,11 +480,45 @@ RegisterNetEvent('bc-banking:v2:payroll', function(data)
         end
     end
     local balance = MySQL.scalar.await('SELECT balance FROM bc_banking_v2_accounts WHERE id = ?', { business.account_id })
-    MySQL.insert.await([[
-        INSERT INTO bc_banking_v2_ledger (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description, metadata)
-        VALUES (?, ?, 'payroll', ?, ?, ?, 'Business payroll payment', ?)
-    ]], { business.account_id, ref, -value, balance, cid, json.encode({ employee=employeeCid }) })
-    MySQL.insert.await('INSERT INTO bc_banking_v2_payroll (business_id, employee_citizenid, amount, actor_citizenid, status) VALUES (?, ?, ?, ?, "paid")', { businessId, employeeCid, value, cid })
+    local recorded, recordResult = pcall(function()
+        return MySQL.transaction.await({
+            {
+                query = [[
+                    INSERT INTO bc_banking_v2_ledger
+                    (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description, metadata)
+                    VALUES (?, ?, 'payroll', ?, ?, ?, 'Business payroll payment', ?)
+                ]],
+                values = { business.account_id, ref, -value, balance, cid, json.encode({ employee=employeeCid }) }
+            },
+            {
+                query = [[
+                    INSERT INTO bc_banking_v2_payroll
+                    (business_id, employee_citizenid, amount, actor_citizenid, status)
+                    VALUES (?, ?, ?, ?, 'paid')
+                ]],
+                values = { businessId, employeeCid, value, cid }
+            }
+        })
+    end)
+    if not recorded or recordResult ~= true then
+        local reversed = false
+        if recipient then
+            reversed = recipient.Functions.RemoveMoney('bank', value, 'bc-banking-business-payroll-reversal') == true
+        else
+            local rollback = MySQL.update.await(
+                "UPDATE players SET money = JSON_SET(money, '$.bank', GREATEST(0, COALESCE(JSON_EXTRACT(money, '$.bank'), 0) - ?)) WHERE citizenid = ?",
+                { value, employeeCid }
+            )
+            reversed = rollback and rollback > 0
+        end
+        MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ?', { value, business.account_id })
+        failIdempotency(idempotencyKey, 'payroll_recording_failed')
+        if not reversed then
+            print(('[bc-banking] CRITICAL: payroll reversal could not be confirmed for employee %s'):format(employeeCid))
+        end
+        TriggerClientEvent('bc-banking:client:notify', src, 'Payroll record failed; reversal was attempted.', 'error')
+        return
+    end
     completeIdempotency(idempotencyKey, { success=true })
     logAudit(cid, 'business.payroll_paid', businessId, { employee=employeeCid, amount=value })
     TriggerClientEvent('bc-banking:client:notify', src, 'Payroll payment sent.', 'success')
