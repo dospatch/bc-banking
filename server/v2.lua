@@ -415,9 +415,29 @@ RegisterNetEvent('bc-banking:v2:createBusiness', function(data)
         TriggerClientEvent('bc-banking:client:notify', src, err or 'Business account failed.', 'error')
         return
     end
-    MySQL.update.await('UPDATE bc_banking_v2_businesses SET account_id = ? WHERE id = ?', { account.id, id })
-    MySQL.insert.await('INSERT INTO bc_banking_v2_business_members (business_id, citizenid, role, permissions, status) VALUES (?, ?, "owner", ?, "active")', { id, cid, json.encode({ view=true, deposit=true, withdraw=true, transfer=true, payroll=true, manage=true }) })
-    logAudit(cid, 'business.created', id, { name=name })
+    local setupOk, setupCommitted = pcall(function()
+        return MySQL.transaction.await({
+            {
+                query = "UPDATE bc_banking_v2_businesses SET account_id = ? WHERE id = ? AND owner_citizenid = ? AND status = 'active'",
+                values = { account.id, id, cid }
+            },
+            {
+                query = [[
+                    INSERT INTO bc_banking_v2_business_members
+                    (business_id, citizenid, role, permissions, status)
+                    VALUES (?, ?, 'owner', ?, 'active')
+                ]],
+                values = { id, cid, json.encode({ view=true, deposit=true, withdraw=true, transfer=true, payroll=true, manage=true }) }
+            }
+        })
+    end)
+    if not setupOk or setupCommitted ~= true then
+        MySQL.update.await("UPDATE bc_banking_v2_businesses SET status = 'failed' WHERE id = ?", { id })
+        MySQL.update.await("UPDATE bc_banking_v2_accounts SET status = 'closed' WHERE id = ? AND owner_citizenid = ?", { account.id, cid })
+        TriggerClientEvent('bc-banking:client:notify', src, 'Business setup failed; its account was closed safely.', 'error')
+        return
+    end
+    logAudit(cid, 'business.created', id, { name=name, account_id=account.id })
     TriggerClientEvent('bc-banking:client:notify', src, 'Business account created.', 'success')
     TriggerClientEvent('bc-banking:client:v2:refresh', src)
 end)
@@ -430,18 +450,33 @@ RegisterNetEvent('bc-banking:v2:addBusinessEmployee', function(data)
     local owner = MySQL.single.await("SELECT id FROM bc_banking_v2_business_members WHERE business_id = ? AND citizenid = ? AND role = 'owner' AND status = 'active'", { businessId, cid })
     if not owner then return end
     local perms = { view=data.permissions and data.permissions.view == true, deposit=data.permissions and data.permissions.deposit == true, withdraw=data.permissions and data.permissions.withdraw == true, transfer=data.permissions and data.permissions.transfer == true, payroll=data.permissions and data.permissions.payroll == true, manage=false }
-    local businessAccount = MySQL.scalar.await('SELECT account_id FROM bc_banking_v2_businesses WHERE id = ?', { businessId })
-    MySQL.insert.await([[
-        INSERT INTO bc_banking_v2_business_members (business_id, citizenid, role, permissions, status)
-        VALUES (?, ?, 'employee', ?, 'active')
-        ON DUPLICATE KEY UPDATE permissions = VALUES(permissions), status = 'active'
-    ]], { businessId, employeeCid, json.encode(perms) })
-    if businessAccount then
-        MySQL.insert.await([[
-            INSERT INTO bc_banking_v2_account_members (account_id, citizenid, role, permissions, status)
-            VALUES (?, ?, 'employee', ?, 'active')
-            ON DUPLICATE KEY UPDATE permissions = VALUES(permissions), status = 'active'
-        ]], { businessAccount, employeeCid, json.encode(perms) })
+    local business = MySQL.single.await("SELECT account_id FROM bc_banking_v2_businesses WHERE id = ? AND owner_citizenid = ? AND status = 'active'", { businessId, cid })
+    if not business or not business.account_id then return end
+    local saved, committed = pcall(function()
+        return MySQL.transaction.await({
+            {
+                query = [[
+                    INSERT INTO bc_banking_v2_business_members
+                    (business_id, citizenid, role, permissions, status)
+                    VALUES (?, ?, 'employee', ?, 'active')
+                    ON DUPLICATE KEY UPDATE permissions = VALUES(permissions), status = 'active'
+                ]],
+                values = { businessId, employeeCid, json.encode(perms) }
+            },
+            {
+                query = [[
+                    INSERT INTO bc_banking_v2_account_members
+                    (account_id, citizenid, role, permissions, status)
+                    VALUES (?, ?, 'employee', ?, 'active')
+                    ON DUPLICATE KEY UPDATE permissions = VALUES(permissions), status = 'active'
+                ]],
+                values = { business.account_id, employeeCid, json.encode(perms) }
+            }
+        })
+    end)
+    if not saved or committed ~= true then
+        TriggerClientEvent('bc-banking:client:notify', src, 'Employee permissions could not be saved.', 'error')
+        return
     end
     logAudit(cid, 'business.employee_added', businessId, { employee=employeeCid })
     TriggerClientEvent('bc-banking:client:notify', src, 'Business employee permissions saved.', 'success')
