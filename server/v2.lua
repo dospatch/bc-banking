@@ -454,7 +454,15 @@ RegisterNetEvent('bc-banking:v2:addBusinessEmployee', function(data)
     if not businessId or #employeeCid < 2 or #employeeCid > 50 or employeeCid == cid then return end
     local owner = MySQL.single.await("SELECT id FROM bc_banking_v2_business_members WHERE business_id = ? AND citizenid = ? AND role = 'owner' AND status = 'active'", { businessId, cid })
     if not owner then return end
-    local perms = { view=data.permissions and data.permissions.view == true, deposit=data.permissions and data.permissions.deposit == true, withdraw=data.permissions and data.permissions.withdraw == true, transfer=data.permissions and data.permissions.transfer == true, payroll=data.permissions and data.permissions.payroll == true, manage=false }
+    local requested = type(data.permissions) == 'table' and data.permissions or {}
+    local perms = {
+        view=requested.view == true,
+        deposit=requested.deposit == true,
+        withdraw=requested.withdraw == true,
+        transfer=requested.transfer == true,
+        payroll=requested.payroll == true,
+        manage=false
+    }
     local business = MySQL.single.await("SELECT account_id FROM bc_banking_v2_businesses WHERE id = ? AND owner_citizenid = ? AND status = 'active'", { businessId, cid })
     if not business or not business.account_id then return end
     local saved, committed = pcall(function()
