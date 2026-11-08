@@ -38,9 +38,9 @@ local ok, reason = exports['bc-banking']:ChargePlayer(source, 500.00, 'bank', 'B
 
 ### Business expense
 ~~~lua
-local ok, reason = exports['bc-banking']:RecordBusinessExpense(businessId, actorCitizenid, 125.00, 'supplies', 'Office supplies')
+local ok, reason = exports['bc-banking']:RecordBusinessExpense(businessId, actorCitizenid, 125.00, 'supplies', 'Office supplies', 'expense-run-unique-123')
 ~~~
-Actor must have active business membership with `withdraw` permission.
+Actor must have active business membership with `withdraw` permission. Pass a unique idempotency key as the sixth argument to prevent duplicate expense debits.
 
 ### Card PIN verification
 ~~~lua
@@ -59,6 +59,7 @@ Allowed statuses: `active`, `frozen`, `closed`.
 Grant ACE permission `bc-banking.admin` only to trusted administrators.
 
 - `bcbankloan <applicationId> approve|reject`
+- `bcbankbusinessloan <applicationId> approve|reject`
 - `bcbankaccount <accountId> freeze|unfreeze|close|reopen`
 - `bcbankaudit <citizenid>`
 
