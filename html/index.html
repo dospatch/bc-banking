@@ -215,6 +215,14 @@
                             <input id="employeePermissions" placeholder="Permissions: view,deposit,withdraw,transfer,payroll">
                             <button id="addEmployeeButton">Add / Update Employee</button>
                             <p class="muted small">Owners can grant employee access through the server API. Payroll is permission-checked and audited.</p>
+                            <div id="v2BusinessLoans" class="v2-list">Loading business loans…</div>
+                            <input id="businessLoanAmount" type="number" min="0.01" step="0.01" placeholder="Business loan amount">
+                            <input id="businessLoanMonths" type="number" min="1" max="24" placeholder="Business loan term (months)">
+                            <button id="applyBusinessLoanButton">Apply for Business Loan</button>
+                            <input id="businessLoanId" type="number" min="1" placeholder="Business loan ID to repay">
+                            <input id="businessLoanRepayment" type="number" min="0.01" step="0.01" placeholder="Business loan repayment">
+                            <button id="repayBusinessLoanButton">Repay Business Loan</button>
+                            <p class="muted small">Admin review: /bcbankbusinessloan ID approve|reject</p>
                         </div>
                     </div>
                 </section>
