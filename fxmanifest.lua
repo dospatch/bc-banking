@@ -3,7 +3,7 @@ game 'gta5'
 
 author 'BCGAMING'
 description 'BC-Banking - Custom QBCore Banking System'
-version '1.0.1'
+version '2.0.0-dev'
 
 lua54 'yes'
 
