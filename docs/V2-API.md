@@ -56,7 +56,17 @@ Allowed statuses: `active`, `frozen`, `closed`.
 
 ## Admin commands
 
-Grant ACE permission `bc-banking.admin` only to trusted administrators.
+Grant the following ACE permissions only to trusted administrators (adjust the group name to match your server):
+
+```cfg
+add_ace group.admin bc-banking.admin allow
+add_ace group.admin command.bcbankloan allow
+add_ace group.admin command.bcbankbusinessloan allow
+add_ace group.admin command.bcbankaccount allow
+add_ace group.admin command.bcbankaudit allow
+```
+
+The command registration and the explicit `bc-banking.admin` check both apply to in-game administrators. Console use remains available to the server owner.
 
 - `bcbankloan <applicationId> approve|reject`
 - `bcbankbusinessloan <applicationId> approve|reject`
