@@ -257,7 +257,7 @@ end)
 QBCore.Functions.CreateCallback('bc-banking:v2:getLoans', function(src, cb)
     local cid = cidFor(src)
     if not cid then cb({}); return end
-    cb(MySQL.query.await('SELECT id, principal, apr, term_months, status, created_at, reviewed_at FROM bc_banking_v2_loans WHERE citizenid = ? ORDER BY id DESC', { cid }) or {})
+    cb(MySQL.query.await('SELECT id, principal, apr, term_months, monthly_payment, balance_due, status, created_at, reviewed_at FROM bc_banking_v2_loans WHERE citizenid = ? ORDER BY id DESC', { cid }) or {})
 end)
 
 QBCore.Functions.CreateCallback('bc-banking:v2:getBusinesses', function(src, cb)
@@ -604,4 +604,72 @@ exports('GetAccountStatement', function(accountId, citizenid, fromDate, toDate, 
           AND (? IS NULL OR created_at <= ?)
         ORDER BY id DESC LIMIT ?
     ]], { accountId, fromDate, fromDate, toDate, toDate, math.max(1, math.min(tonumber(limit) or 100, 500)) }) or {}
+end)
+
+
+local function processScheduledPayments()
+    local due = MySQL.query.await([[
+        SELECT * FROM bc_banking_v2_scheduled_payments
+        WHERE status = 'active' AND next_run_at <= CURRENT_TIMESTAMP
+        ORDER BY next_run_at ASC LIMIT 100
+    ]]) or {}
+    for _, payment in ipairs(due) do
+        local claimed = MySQL.update.await([[
+            UPDATE bc_banking_v2_scheduled_payments SET status = 'processing'
+            WHERE id = ? AND status = 'active' AND next_run_at <= CURRENT_TIMESTAMP
+        ]], { payment.id })
+        if claimed and claimed > 0 then
+            local ref = ('sch-%s-%s'):format(payment.id, os.time())
+            local changed = MySQL.update.await([[
+                UPDATE bc_banking_v2_accounts AS src
+                JOIN bc_banking_v2_accounts AS dst ON dst.id = ?
+                SET src.balance = src.balance - ?, dst.balance = dst.balance + ?
+                WHERE src.id = ? AND src.status = 'active' AND dst.status = 'active'
+                  AND src.balance >= ? AND src.id <> dst.id
+            ]], { payment.destination_account_id, payment.amount, payment.amount, payment.source_account_id, payment.amount })
+            if changed and changed >= 2 then
+                local ok = pcall(function()
+                    MySQL.insert.await([[
+                        INSERT INTO bc_banking_v2_ledger
+                        (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description, metadata)
+                        SELECT id, ?, 'scheduled_out', ?, balance, ?, ?, ?
+                        FROM bc_banking_v2_accounts WHERE id = ?
+                    ]], { ref, payment.amount, payment.owner_citizenid, payment.description, json.encode({ payment_id=payment.id }), payment.source_account_id })
+                    MySQL.insert.await([[
+                        INSERT INTO bc_banking_v2_ledger
+                        (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description, metadata)
+                        SELECT id, ?, 'scheduled_in', ?, balance, ?, ?, ?
+                        FROM bc_banking_v2_accounts WHERE id = ?
+                    ]], { ref, payment.amount, payment.owner_citizenid, payment.description, json.encode({ payment_id=payment.id }), payment.destination_account_id })
+                end)
+                if ok then
+                    if payment.frequency == 'weekly' then
+                        MySQL.update.await("UPDATE bc_banking_v2_scheduled_payments SET status = 'active', next_run_at = DATE_ADD(next_run_at, INTERVAL 7 DAY) WHERE id = ?", { payment.id })
+                    elseif payment.frequency == 'monthly' then
+                        MySQL.update.await("UPDATE bc_banking_v2_scheduled_payments SET status = 'active', next_run_at = DATE_ADD(next_run_at, INTERVAL 1 MONTH) WHERE id = ?", { payment.id })
+                    else
+                        MySQL.update.await("UPDATE bc_banking_v2_scheduled_payments SET status = 'completed' WHERE id = ?", { payment.id })
+                    end
+                else
+                    MySQL.update.await([[
+                        UPDATE bc_banking_v2_accounts AS src
+                        JOIN bc_banking_v2_accounts AS dst ON dst.id = ?
+                        SET src.balance = src.balance + ?, dst.balance = dst.balance - ?
+                        WHERE src.id = ?
+                    ]], { payment.destination_account_id, payment.amount, payment.amount, payment.source_account_id })
+                    MySQL.update.await("UPDATE bc_banking_v2_scheduled_payments SET status = 'failed' WHERE id = ?", { payment.id })
+                end
+            else
+                MySQL.update.await("UPDATE bc_banking_v2_scheduled_payments SET status = 'failed' WHERE id = ?", { payment.id })
+            end
+        end
+    end
+end
+
+CreateThread(function()
+    while true do
+        Wait(60000)
+        local ok, err = pcall(processScheduledPayments)
+        if not ok then print(('[bc-banking] Scheduled payment processor failed: %s'):format(tostring(err))) end
+    end
 end)
