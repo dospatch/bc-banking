@@ -77,6 +77,7 @@ RegisterNUICallback('v2Goals', function(_, cb) v2Callback('getGoals', nil, cb) e
 RegisterNUICallback('v2Cards', function(_, cb) v2Callback('getCards', nil, cb) end)
 RegisterNUICallback('v2Loans', function(_, cb) v2Callback('getLoans', nil, cb) end)
 RegisterNUICallback('v2Businesses', function(_, cb) v2Callback('getBusinesses', nil, cb) end)
+RegisterNUICallback('v2ScheduledPayments', function(_, cb) v2Callback('getScheduledPayments', nil, cb) end)
 
 local v2Events = {
     createV2Account = 'bc-banking:v2:createAccount',
@@ -88,7 +89,10 @@ local v2Events = {
     applyLoan = 'bc-banking:v2:applyLoan',
     createBusiness = 'bc-banking:v2:createBusiness',
     addBusinessEmployee = 'bc-banking:v2:addBusinessEmployee',
-    payroll = 'bc-banking:v2:payroll'
+    payroll = 'bc-banking:v2:payroll',
+    createScheduledPayment = 'bc-banking:v2:createScheduledPayment',
+    cancelScheduledPayment = 'bc-banking:v2:cancelScheduledPayment',
+    repayLoan = 'bc-banking:v2:repayLoan'
 }
 
 for callbackName, eventName in pairs(v2Events) do
