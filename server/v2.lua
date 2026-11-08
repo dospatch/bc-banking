@@ -204,17 +204,16 @@ RegisterNetEvent('bc-banking:v2:issueCard', function(data)
     if count >= (tonumber(Config.V2 and Config.V2.MaxCards) or 3) then
         TriggerClientEvent('bc-banking:client:notify', src, 'You have reached your active card limit.', 'error'); return
     end
-    local raw = ''
-    for _ = 1, 16 do raw = raw .. tostring(math.random(0, 9)) end
-    local last4 = raw:sub(-4)
-    -- Only a salted server hash is stored. The full PAN is never persisted or logged.
-    local salt = tostring(math.random(100000, 999999)) .. tostring(os.time())
-    local hash = GetHashKey(salt .. raw .. (Config.V2 and Config.V2.CardPepper or ''))
+    local nonce, salt = '', tostring(math.random(100000, 999999)) .. tostring(os.time()) .. tostring(math.random(100000,999999))
+    for _ = 1, 32 do nonce = nonce .. tostring(math.random(0, 9)) end
+    local last4 = nonce:sub(-4)
+    -- The token is hashed by the database and never stored in plaintext.
     local id = MySQL.insert.await([[
         INSERT INTO bc_banking_v2_cards (citizenid, account_id, card_hash, card_last4, card_type, status, expires_at)
-        VALUES (?, ?, ?, ?, 'debit', 'active', DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 4 YEAR))
-    ]], { cid, accountId, tostring(hash), last4 })
+        VALUES (?, ?, SHA2(CONCAT(?, ?, ?), 256), ?, 'debit', 'active', DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 4 YEAR))
+    ]], { cid, accountId, nonce, salt, tostring(Config.V2 and Config.V2.CardPepper or ''), last4 })
     if id then
+        MySQL.insert.await('INSERT INTO bc_banking_v2_card_secrets (card_id, pin_salt) VALUES (?, ?)', { id, salt })
         logAudit(cid, 'card.issued', id, { last4=last4 })
         TriggerClientEvent('bc-banking:client:notify', src, 'Card issued ending in ' .. last4 .. '. Card number is not recoverable.', 'success')
         TriggerClientEvent('bc-banking:client:v2:refresh', src)
@@ -672,4 +671,67 @@ CreateThread(function()
         local ok, err = pcall(processScheduledPayments)
         if not ok then print(('[bc-banking] Scheduled payment processor failed: %s'):format(tostring(err))) end
     end
+end)
+
+
+RegisterNetEvent('bc-banking:v2:setCardPin', function(data)
+    local src, cid = source, cidFor(source)
+    if not cid or type(data) ~= 'table' then return end
+    local cardId, pin = tonumber(data.cardId), tostring(data.pin or '')
+    if not cardId or not pin:match('^%d%d%d%d%d?%d?$') then
+        TriggerClientEvent('bc-banking:client:notify', src, 'PIN must contain 4 to 6 digits.', 'error'); return
+    end
+    local card = MySQL.single.await("SELECT id FROM bc_banking_v2_cards WHERE id = ? AND citizenid = ? AND status = 'active'", { cardId, cid })
+    if not card then return end
+    local salt = tostring(math.random(100000,999999)) .. tostring(os.time()) .. tostring(math.random(100000,999999))
+    local changed = MySQL.update.await([[
+        INSERT INTO bc_banking_v2_card_secrets (card_id, pin_salt, pin_hash, pin_attempts, pin_locked_until)
+        VALUES (?, ?, SHA2(CONCAT(?, ?, ?), 256), 0, NULL)
+        ON DUPLICATE KEY UPDATE pin_salt = VALUES(pin_salt), pin_hash = VALUES(pin_hash),
+            pin_attempts = 0, pin_locked_until = NULL
+    ]], { cardId, salt, pin, salt, tostring(Config.V2 and Config.V2.CardPepper or '') })
+    if changed ~= nil then
+        logAudit(cid, 'card.pin_changed', cardId, {})
+        TriggerClientEvent('bc-banking:client:notify', src, 'Card PIN updated.', 'success')
+    end
+end)
+
+RegisterNetEvent('bc-banking:v2:replaceCard', function(data)
+    local src, cid = source, cidFor(source)
+    local oldId = type(data) == 'table' and tonumber(data.cardId)
+    if not cid or not oldId then return end
+    local card = MySQL.single.await("SELECT account_id FROM bc_banking_v2_cards WHERE id = ? AND citizenid = ? AND status IN ('active','frozen')", { oldId, cid })
+    if not card then return end
+    MySQL.update.await("UPDATE bc_banking_v2_cards SET status = 'replaced' WHERE id = ? AND citizenid = ?", { oldId, cid })
+    TriggerEvent('bc-banking:v2:issueCard:internal', src, cid, card.account_id)
+    logAudit(cid, 'card.replaced', oldId, {})
+end)
+
+exports('VerifyCardPin', function(cardId, citizenid, pin)
+    pin = tostring(pin or '')
+    if not tostring(pin):match('^%d%d%d%d%d?%d?$') then return false end
+    local row = MySQL.single.await([[
+        SELECT c.id, s.pin_salt, s.pin_hash, s.pin_attempts, s.pin_locked_until
+        FROM bc_banking_v2_cards c
+        JOIN bc_banking_v2_card_secrets s ON s.card_id = c.id
+        WHERE c.id = ? AND c.citizenid = ? AND c.status = 'active'
+        LIMIT 1
+    ]], { cardId, citizenid })
+    if not row or not row.pin_hash then return false end
+    if row.pin_locked_until and tostring(row.pin_locked_until) > os.date('%Y-%m-%d %H:%M:%S') then return false end
+    local valid = MySQL.scalar.await([[
+        SELECT (pin_hash = SHA2(CONCAT(?, pin_salt, ?), 256))
+        FROM bc_banking_v2_card_secrets WHERE card_id = ?
+    ]], { pin, tostring(Config.V2 and Config.V2.CardPepper or ''), cardId })
+    if tonumber(valid) == 1 then
+        MySQL.update.await('UPDATE bc_banking_v2_card_secrets SET pin_attempts = 0, pin_locked_until = NULL WHERE card_id = ?', { cardId })
+        return true
+    end
+    MySQL.update.await([[
+        UPDATE bc_banking_v2_card_secrets
+        SET pin_attempts = pin_attempts + 1,
+            pin_locked_until = IF(pin_attempts + 1 >= 5, DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 15 MINUTE), pin_locked_until)
+        WHERE card_id = ?
+    ]], { cardId })
+    return false
 end)
