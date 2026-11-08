@@ -20,6 +20,7 @@ Config.V2 = {
 }
 
 Config.BankCommand = 'bank'
+Config.ATMCommand = 'atm'
 Config.CashCommand = 'cash'
 
 Config.Currency = '$'
