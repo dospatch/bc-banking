@@ -14,6 +14,19 @@ local function isAdmin(source)
     return QBCore.Functions.HasPermission(source, 'admin') or QBCore.Functions.HasPermission(source, 'god')
 end
 
+
+QBCore.Functions.CreateCallback('bc-banking:v2:getBusinessLoans', function(source, cb)
+    local Player = QBCore.Functions.GetPlayer(source)
+    if not Player or not BCBanking.V2.Ready then cb({}); return end
+    cb(MySQL.query.await([[
+        SELECT id, account_id, principal, apr, months, remaining_balance,
+               status, created_at, approved_at
+        FROM bc_banking_v2_loans
+        WHERE citizenid = ? AND loan_type = 'business'
+        ORDER BY id DESC LIMIT 50
+    ]], { Player.PlayerData.citizenid }) or {})
+end)
+
 QBCore.Functions.CreateCallback('bc-banking:v2:getLoans', function(source, cb)
     local Player = QBCore.Functions.GetPlayer(source)
     if not Player or not BCBanking.V2.Ready then cb({}); return end
