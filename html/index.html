@@ -215,6 +215,11 @@
                             <input id="employeePermissions" placeholder="Permissions: view,deposit,withdraw,transfer,payroll">
                             <button id="addEmployeeButton">Add / Update Employee</button>
                             <p class="muted small">Owners can grant employee access through the server API. Payroll is permission-checked and audited.</p>
+                            <div id="v2BusinessExpenses" class="v2-list">Select a business to view expenses.</div>
+                            <input id="expenseAmount" type="number" min="0.01" step="0.01" placeholder="Expense amount">
+                            <input id="expenseCategory" maxlength="48" placeholder="Expense category">
+                            <input id="expenseDescription" maxlength="255" placeholder="Expense description">
+                            <button id="recordExpenseButton">Record Business Expense</button>
                             <div id="v2BusinessLoans" class="v2-list">Loading business loans…</div>
                             <input id="businessLoanAmount" type="number" min="0.01" step="0.01" placeholder="Business loan amount">
                             <input id="businessLoanMonths" type="number" min="1" max="24" placeholder="Business loan term (months)">
