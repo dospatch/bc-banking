@@ -32,7 +32,7 @@ These exports operate on V2 ledger balances; they do not debit or credit QBCore 
 
 ### Charge player using cash or bank
 ~~~lua
-local ok, reason = exports['bc-banking']:ChargePlayer(source, 500.00, 'bank', 'BC-Dealership purchase')
+local ok, reason = exports['bc-banking']:ChargePlayer(source, 500.00, 'bank', 'BC-Dealership purchase', 'dealership-order-12345')
 ~~~
 `paymentSource` must be `cash` or `bank`. Only complete the calling resource's purchase after `ok == true`.
 
