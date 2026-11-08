@@ -236,6 +236,13 @@ bindV2('contributeGoalButton', 'contributeGoal', () => ({
     goalId: Number(document.getElementById('goalId').value),
     amount: Number(document.getElementById('goalContribution').value)
 }));
+bindV2('setCardPinButton', 'setCardPin', () => ({
+    cardId: Number(document.getElementById('pinCardId').value),
+    pin: document.getElementById('cardPin').value
+}));
+bindV2('replaceCardButton', 'replaceCard', () => ({
+    cardId: Number(document.getElementById('pinCardId').value)
+}));
 bindV2('issueCardButton', 'issueCard', () => ({
     accountId: Number(document.getElementById('cardAccountId').value)
 }));
