@@ -220,6 +220,13 @@ async function refreshV2() {
         'No business loan applications yet.');
 }
 
+function newV2IdempotencyKey() {
+    const token = window.crypto && typeof window.crypto.randomUUID === 'function'
+        ? window.crypto.randomUUID()
+        : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+    return ('bcv2-' + token).slice(0, 80);
+}
+
 function bindV2(id, endpoint, values) {
     const button = document.getElementById(id);
     if (!button) return;
@@ -237,13 +244,15 @@ bindV2('v2TransferButton', 'v2Transfer', () => ({
     accountId: Number(document.getElementById('v2SourceAccount').value),
     recipient: document.getElementById('v2Recipient').value.trim(),
     amount: Number(document.getElementById('v2TransferAmount').value),
-    description: document.getElementById('v2TransferDescription').value.trim()
+    description: document.getElementById('v2TransferDescription').value.trim(),
+    idempotencyKey: newV2IdempotencyKey()
 }));
 bindV2('fundAccountButton', 'fundV2Account', () => ({
     accountId: Number(document.getElementById('v2SourceAccount').value),
     amount: Number(document.getElementById('fundAmount').value),
     source: document.getElementById('fundSource').value,
-    isATM: currentIsATM === true
+    isATM: currentIsATM === true,
+    idempotencyKey: newV2IdempotencyKey()
 }));
 bindV2('withdrawAccountButton', 'withdrawV2Account', () => ({
     accountId: Number(document.getElementById('v2SourceAccount').value),
@@ -257,7 +266,8 @@ bindV2('createGoalButton', 'createGoal', () => ({
 }));
 bindV2('contributeGoalButton', 'contributeGoal', () => ({
     goalId: Number(document.getElementById('goalId').value),
-    amount: Number(document.getElementById('goalContribution').value)
+    amount: Number(document.getElementById('goalContribution').value),
+    idempotencyKey: newV2IdempotencyKey()
 }));
 bindV2('issueCardButton', 'issueCard', () => ({
     accountId: Number(document.getElementById('cardAccountId').value),
@@ -276,13 +286,15 @@ bindV2('applyLoanButton', 'applyLoan', () => ({
 }));
 bindV2('repayLoanButton', 'repayLoan', () => ({
     loanId: Number(document.getElementById('repayLoanId').value),
-    amount: Number(document.getElementById('repayLoanAmount').value)
+    amount: Number(document.getElementById('repayLoanAmount').value),
+    idempotencyKey: newV2IdempotencyKey()
 }));
 bindV2('recordExpenseButton', 'businessExpense', () => ({
     businessId: Number(document.getElementById('businessId').value),
     amount: Number(document.getElementById('expenseAmount').value),
     category: document.getElementById('expenseCategory').value.trim(),
-    description: document.getElementById('expenseDescription').value.trim()
+    description: document.getElementById('expenseDescription').value.trim(),
+    idempotencyKey: newV2IdempotencyKey()
 }));
 bindV2('applyBusinessLoanButton', 'applyBusinessLoan', () => ({
     businessId: Number(document.getElementById('businessId').value),
@@ -291,7 +303,8 @@ bindV2('applyBusinessLoanButton', 'applyBusinessLoan', () => ({
 }));
 bindV2('repayBusinessLoanButton', 'repayBusinessLoan', () => ({
     loanId: Number(document.getElementById('businessLoanId').value),
-    amount: Number(document.getElementById('businessLoanRepayment').value)
+    amount: Number(document.getElementById('businessLoanRepayment').value),
+    idempotencyKey: newV2IdempotencyKey()
 }));
 bindV2('createBusinessButton', 'createBusiness', () => ({
     name: document.getElementById('businessName').value.trim()
@@ -299,7 +312,8 @@ bindV2('createBusinessButton', 'createBusiness', () => ({
 bindV2('payrollButton', 'payroll', () => ({
     businessId: Number(document.getElementById('businessId').value),
     citizenid: document.getElementById('employeeCitizenId').value.trim(),
-    amount: Number(document.getElementById('employeeAmount').value)
+    amount: Number(document.getElementById('employeeAmount').value),
+    idempotencyKey: newV2IdempotencyKey()
 }));
 bindV2('addEmployeeButton', 'addBusinessEmployee', () => {
     const parts = document.getElementById('employeePermissions').value.split(',').map(value => value.trim());
