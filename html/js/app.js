@@ -18,7 +18,7 @@ function money(value) {
 }
 
 async function nui(endpoint, data = {}) {
-    const idempotentEndpoints = ['v2Transfer', 'fundV2Account', 'withdrawV2Account', 'contributeGoal', 'repayLoan', 'payroll', 'repayBusinessLoan'];
+    const idempotentEndpoints = ['v2Transfer', 'fundV2Account', 'withdrawV2Account', 'contributeGoal', 'repayLoan', 'payroll', 'repayBusinessLoan', 'businessExpense'];
     if (idempotentEndpoints.includes(endpoint)) {
         const key = window.crypto && typeof window.crypto.randomUUID === 'function'
             ? window.crypto.randomUUID()
@@ -150,7 +150,7 @@ function listRows(target, rows, renderRow, empty) {
 async function refreshV2() {
     const results = await Promise.all([
         nui('v2Accounts'), nui('v2Goals'), nui('v2Cards'), nui('v2Loans'),
-        nui('v2Businesses'), nui('v2ScheduledPayments'), nui('v2BusinessLoans')
+        nui('v2Businesses'), nui('v2ScheduledPayments'), nui('v2BusinessLoans'), nui('v2BusinessExpenses', { businessId: Number(document.getElementById('businessId').value) })
     ]);
     const accounts = results[0] || [];
     const goals = results[1] || [];
@@ -159,6 +159,7 @@ async function refreshV2() {
     const businesses = results[4] || [];
     const schedules = results[5] || [];
     const businessLoans = results[6] || [];
+    const businessExpenses = results[7] || [];
 
     const sourceSelect = document.getElementById('v2SourceAccount');
     if (sourceSelect) {
@@ -206,6 +207,9 @@ async function refreshV2() {
         ' • ' + escapeHtml(payment.next_run_at) + '</span><b>' + money(payment.amount) +
         '</b><button class="mini-button" data-schedule-id="' + escapeHtml(payment.id) +
         '">Cancel</button>', 'No scheduled payments yet.');
+
+    listRows('v2BusinessExpenses', businessExpenses, expense =>
+        '<strong>' + escapeHtml(expense.category) + ' • ' + money(expense.amount) + '</strong><span>' + escapeHtml(expense.description) + ' • ' + escapeHtml(expense.created_at) + '</span>', 'No business expenses found for this business.');
 
     listRows('v2BusinessLoans', businessLoans, loan =>
         '<strong>Business loan #' + escapeHtml(loan.id) + ' • ' + escapeHtml(loan.business_name) +
@@ -268,6 +272,12 @@ bindV2('applyLoanButton', 'applyLoan', () => ({
 bindV2('repayLoanButton', 'repayLoan', () => ({
     loanId: Number(document.getElementById('repayLoanId').value),
     amount: Number(document.getElementById('repayLoanAmount').value)
+}));
+bindV2('recordExpenseButton', 'businessExpense', () => ({
+    businessId: Number(document.getElementById('businessId').value),
+    amount: Number(document.getElementById('expenseAmount').value),
+    category: document.getElementById('expenseCategory').value.trim(),
+    description: document.getElementById('expenseDescription').value.trim()
 }));
 bindV2('applyBusinessLoanButton', 'applyBusinessLoan', () => ({
     businessId: Number(document.getElementById('businessId').value),
