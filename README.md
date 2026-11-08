@@ -28,8 +28,8 @@ V2 currently adds:
 ### V2 installation and migration
 1. Keep your current V1.0.1 resource and take a complete database backup.
 2. Test V2 only on a staging server and a copy of your V1 database.
-3. The resource runs additive V2 schema migrations on startup; V1 tables and records are not intentionally modified.
-4. Do not manually run V2 SQL migrations if the runtime migration has already created the tables.
+3. The resource runs the additive V2 schema migration automatically on startup and records schema version 4 in `bc_banking_schema_versions`. It creates all V2 tables while leaving V1 tables and records in place.
+4. **Do not import `002_v2_accounts_ledger.sql` or `003_v2_full_features.sql` manually.** The runtime migration runner contains and applies the complete ordered schema. `sql/bc_banking.sql` is for a fresh V1 database install, not a V2 upgrade.
 5. Set a private `Config.V2.CardPepper` value in the installed server copy; do not commit it to GitHub.
 6. Keep production on V1 until all V2 tests pass and a release is explicitly approved.
 
