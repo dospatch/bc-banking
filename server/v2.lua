@@ -1191,7 +1191,9 @@ RegisterNetEvent('bc-banking:v2:fundAccount', function(data)
     if not cid or type(data) ~= 'table' then return end
     local accountId, value = tonumber(data.accountId), amount(data.amount, tonumber(Config.MaxDeposit) or 1000000)
     local sourceType = data.source == 'cash' and 'cash' or (data.source == 'bank' and 'bank' or nil)
-    if not accountId or not value or not sourceType then return end
+    local fee = data.isATM == true and BCBanking.RoundMoney(Config.V2 and Config.V2.ATMDepositFee or 0) or 0
+    local total = value and (value + fee) or 0
+    if not accountId or not value or not sourceType or fee < 0 then return end
     local access = member(accountId, cid)
     if not access then return end
     local perms = type(access.permissions) == 'table' and access.permissions or json.decode(access.permissions or '{}') or {}
@@ -1202,11 +1204,11 @@ RegisterNetEvent('bc-banking:v2:fundAccount', function(data)
     local player = playerFor(src)
     if not player then failIdempotency(idempotencyKey, 'player_unavailable'); return end
     local ok, message = BCBanking.WithPlayerLocks({ cid }, function()
-        if (tonumber(player.PlayerData.money[sourceType]) or 0) < value then return false, 'Insufficient funds.' end
-        if not player.Functions.RemoveMoney(sourceType, value, 'bc-banking-v2-account-deposit') then return false, 'Money could not be removed.' end
+        if (tonumber(player.PlayerData.money[sourceType]) or 0) < total then return false, 'Insufficient funds for the deposit and ATM fee.' end
+        if not player.Functions.RemoveMoney(sourceType, total, 'bc-banking-v2-account-deposit') then return false, 'Money could not be removed.' end
         local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ? AND status = "active"', { value, accountId })
         if not changed or changed < 1 then
-            player.Functions.AddMoney(sourceType, value, 'bc-banking-v2-account-deposit-refund')
+            player.Functions.AddMoney(sourceType, total, 'bc-banking-v2-account-deposit-refund')
             return false, 'Deposit failed and was reversed.'
         end
         local logged = pcall(function()
@@ -1217,11 +1219,12 @@ RegisterNetEvent('bc-banking:v2:fundAccount', function(data)
         end)
         if not logged then
             MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ?', { value, accountId })
-            player.Functions.AddMoney(sourceType, value, 'bc-banking-v2-account-deposit-refund')
+            player.Functions.AddMoney(sourceType, total, 'bc-banking-v2-account-deposit-refund')
             return false, 'Deposit could not be recorded and was reversed.'
         end
         completeIdempotency(idempotencyKey, { success=true })
-        logAudit(cid, 'account.deposit', accountId, { amount=value, source=sourceType })
+        logAudit(cid, 'account.deposit', accountId, { amount=value, source=sourceType, atm=data.isATM == true, fee=fee })
+        if fee > 0 then pcall(function() exports['bc-banking']:AddTransaction(cid, 'fee', fee, 'V2 ATM deposit fee') end) end
         return true, 'Account funded.'
     end)
     if not ok then failIdempotency(idempotencyKey, message or 'deposit_failed') end
@@ -1234,7 +1237,9 @@ RegisterNetEvent('bc-banking:v2:withdrawAccount', function(data)
     if not cid or type(data) ~= 'table' then return end
     local accountId, value = tonumber(data.accountId), amount(data.amount, tonumber(Config.MaxWithdrawal) or 1000000)
     local destination = data.destination == 'cash' and 'cash' or (data.destination == 'bank' and 'bank' or nil)
-    if not accountId or not value or not destination then return end
+    local fee = data.isATM == true and BCBanking.RoundMoney(Config.V2 and Config.V2.ATMWithdrawalFee or 0) or 0
+    local total = value and (value + fee) or 0
+    if not accountId or not value or not destination or fee < 0 then return end
     local access = member(accountId, cid)
     if not access then return end
     local perms = type(access.permissions) == 'table' and access.permissions or json.decode(access.permissions or '{}') or {}
@@ -1245,25 +1250,35 @@ RegisterNetEvent('bc-banking:v2:withdrawAccount', function(data)
     local player = playerFor(src)
     if not player then failIdempotency(idempotencyKey, 'player_unavailable'); return end
     local ok, message = BCBanking.WithPlayerLocks({ cid }, function()
-        local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ? AND status = "active" AND balance >= ?', { value, accountId, value })
-        if not changed or changed < 1 then return false, 'Insufficient account funds.' end
+        local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ? AND status = "active" AND balance >= ?', { total, accountId, total })
+        if not changed or changed < 1 then return false, 'Insufficient account funds for the withdrawal and ATM fee.' end
         if not player.Functions.AddMoney(destination, value, 'bc-banking-v2-account-withdrawal') then
-            MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ?', { value, accountId })
+            MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ?', { total, accountId })
             return false, 'Withdrawal failed and was reversed.'
         end
+        local withdrawalRef = ('cashout-%s-%s'):format(os.time(), math.random(100000,999999))
+        local feeRef = ('atmfee-%s-%s'):format(os.time(), math.random(100000,999999))
         local logged = pcall(function()
             MySQL.insert.await([[
                 INSERT INTO bc_banking_v2_ledger (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description)
                 SELECT id, ?, 'withdrawal', ?, balance, ?, ? FROM bc_banking_v2_accounts WHERE id = ?
-            ]], { ('cashout-%s-%s'):format(os.time(), math.random(100000,999999)), value, cid, 'Withdrawal to ' .. destination, accountId })
+            ]], { withdrawalRef, -value, cid, 'Withdrawal to ' .. destination, accountId })
+            if fee > 0 then
+                MySQL.insert.await([[
+                    INSERT INTO bc_banking_v2_ledger (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description)
+                    SELECT id, ?, 'fee', ?, balance, ?, 'ATM withdrawal fee' FROM bc_banking_v2_accounts WHERE id = ?
+                ]], { feeRef, -fee, cid, accountId })
+            end
         end)
         if not logged then
             player.Functions.RemoveMoney(destination, value, 'bc-banking-v2-account-withdrawal-reversal')
-            MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ?', { value, accountId })
+            MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ?', { total, accountId })
+            MySQL.update.await('DELETE FROM bc_banking_v2_ledger WHERE transaction_ref IN (?, ?)', { withdrawalRef, feeRef })
             return false, 'Withdrawal could not be recorded and was reversed.'
         end
         completeIdempotency(idempotencyKey, { success=true })
-        logAudit(cid, 'account.withdraw', accountId, { amount=value, destination=destination })
+        logAudit(cid, 'account.withdraw', accountId, { amount=value, destination=destination, atm=data.isATM == true, fee=fee })
+        if fee > 0 then pcall(function() exports['bc-banking']:AddTransaction(cid, 'fee', fee, 'V2 ATM withdrawal fee') end) end
         return true, 'Withdrawal completed.'
     end)
     if not ok then failIdempotency(idempotencyKey, message or 'withdrawal_failed') end
