@@ -3,7 +3,7 @@ game 'gta5'
 
 author 'BCGAMING'
 description 'BC-Banking - Custom QBCore Banking System'
-version '1.0.1'
+version '2.0.0-dev'
 
 lua54 'yes'
 
@@ -30,6 +30,8 @@ server_scripts {
     '@oxmysql/lib/MySQL.lua',
     'server/main.lua',
     'server/discord.lua',
+    'server/migrations.lua',
+    'server/v2.lua',
     'server/locks.lua',
     'server/accounts.lua',
     'server/transactions.lua',

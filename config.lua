@@ -2,7 +2,25 @@ Config = {}
 
 Config.Debug = false
 
+Config.V2 = {
+    Enabled = true,
+    MaxPersonalAccounts = 5,
+    MaxCards = 3,
+    MaxLoan = 500000,
+    MaxLoanMonths = 24,
+    LoanAPR = 5.0,
+    SavingsAPR = 1.0,
+    ATMDepositFee = 0,
+    ATMWithdrawalFee = 0,
+    MaxPayment = 1000000,
+    MaxPayrollPayment = 100000,
+    InternalTransferFee = 0,
+    -- Optional secret used only as additional entropy for card verification hashes.
+    CardPepper = ''
+}
+
 Config.BankCommand = 'bank'
+Config.ATMCommand = 'atm'
 Config.CashCommand = 'cash'
 
 Config.Currency = '$'

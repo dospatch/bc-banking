@@ -1,5 +1,9 @@
 local function openBank()
-    BCBanking.OpenBank()
+    BCBanking.OpenBank(false)
+end
+
+local function openATM()
+    BCBanking.OpenBank(true)
 end
 
 CreateThread(function()
@@ -28,7 +32,7 @@ CreateThread(function()
             icon = Config.Target.ATMIcon,
             label = 'Use BC-Banking ATM',
             distance = Config.Target.ATMDistance,
-            onSelect = openBank
+            onSelect = openATM
         }
     })
 end)

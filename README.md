@@ -8,6 +8,31 @@ Built for **QBCore** with **oxmysql**, BC-Banking is designed to be simple to in
 
 ---
 
+## 🚧 V2.0.0 Development
+
+V2 is being developed on `feature/bc-banking-v2`. It is **not released** and must not be installed on a production server until migration and runtime test gates pass. V1.0.1 on `main` remains the stable release.
+
+V2 currently adds:
+- Multiple checking, savings and business accounts with separate balances and a transaction ledger.
+- Cash/bank funding and withdrawals, account transfers, statements and integration exports.
+- Savings goals and configurable daily savings interest.
+- Debit-card records, freeze/unfreeze, replacement, salted PIN hashes and failed-PIN lockout.
+- Personal and business loan applications, staff approval/rejection and repayments.
+- Business accounts, employee permissions, payroll and expense recording.
+- One-time, weekly and monthly scheduled account payments.
+- Admin account controls, audit records and BC Systems payment/business exports.
+- V2 NUI panels for these workflows.
+
+**Release status:** feature implementation in progress; not fully runtime-tested. See [V2 implementation plan](docs/V2-IMPLEMENTATION-PLAN.md), [V2 API](docs/V2-API.md), and [V2 test plan](docs/V2-TESTING.md).
+
+### V2 installation and migration
+1. Keep your current V1.0.1 resource and take a complete database backup.
+2. Test V2 only on a staging server and a copy of your V1 database.
+3. The resource runs additive V2 schema migrations on startup; V1 tables and records are not intentionally modified.
+4. Do not manually run V2 SQL migrations if the runtime migration has already created the tables.
+5. Set a private `Config.V2.CardPepper` value in the installed server copy; do not commit it to GitHub.
+6. Keep production on V1 until all V2 tests pass and a release is explicitly approved.
+
 ## ✨ Features
 
 ### 💳 Banking System
@@ -844,9 +869,9 @@ Also check the FiveM client console for JavaScript or NUI errors.
 
 # 📋 Version
 
-**Current Version:** `1.0.1`
+**Development Version:** `2.0.0-dev`
 
-**Release Status:** V1.0 development build — requires FiveM runtime testing before production use
+**Release Status:** V2.0.0 development build — not released; implementation and FiveM runtime testing are still in progress. V1.0.1 remains the stable release.
 
 ---
 

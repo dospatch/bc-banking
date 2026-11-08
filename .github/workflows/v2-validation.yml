@@ -1,0 +1,49 @@
+name: BC-Banking validation
+
+on:
+  push:
+    branches:
+      - main
+      - feature/bc-banking-v2
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  static-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Lua 5.4
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.4
+      - name: Validate Lua syntax
+        run: |
+          find . -type f -name '*.lua' -print0 | while IFS= read -r -d '' file; do
+            echo "Checking $file"
+            luac5.4 -p "$file"
+          done
+      - name: Validate NUI JavaScript syntax
+        run: node --check html/js/app.js
+      - name: Validate required V2 files
+        run: |
+          test -f server/v2.lua
+          test -f docs/V2-API.md
+          test -f docs/V2-TESTING.md
+          test -f sql/migrations/003_v2_full_features.sql
+          grep -q "server/v2.lua" fxmanifest.lua
+          grep -q "version '2.0.0-dev'" fxmanifest.lua
+      - name: Validate NUI HTML structure
+        run: |
+          python3 - <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          class Check(HTMLParser):
+              pass
+          parser = Check()
+          parser.feed(Path("html/index.html").read_text(encoding="utf-8"))
+          parser.close()
+          print("NUI HTML parsed successfully")
+          PY

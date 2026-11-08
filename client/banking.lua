@@ -1,6 +1,6 @@
 local QBCore = exports['qb-core']:GetCoreObject()
 
-RegisterNetEvent('bc-banking:client:open', function()
+RegisterNetEvent('bc-banking:client:open', function(isATM)
     QBCore.Functions.TriggerCallback(
         'bc-banking:server:getDashboard',
         function(data)
@@ -13,7 +13,8 @@ RegisterNetEvent('bc-banking:client:open', function()
 
             SendNUIMessage({
                 action = 'open',
-                data = data
+                data = data,
+                isATM = isATM == true
             })
         end
     )
