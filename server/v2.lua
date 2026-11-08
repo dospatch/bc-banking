@@ -182,7 +182,7 @@ RegisterNetEvent('bc-banking:v2:contributeGoal', function(data)
     end
     local removed = player.Functions.RemoveMoney('bank', value, 'bc-banking-savings-goal')
     if not removed then return end
-    local updated = MySQL.update.await('UPDATE bc_banking_v2_savings_goals SET status = IF(current_amount + ? >= target_amount, 'completed', status), current_amount = current_amount + ? WHERE id = ? AND citizenid = ?', { value, value, goalId, cid })
+    local updated = MySQL.update.await("UPDATE bc_banking_v2_savings_goals SET status = IF(current_amount + ? >= target_amount, 'completed', status), current_amount = current_amount + ? WHERE id = ? AND citizenid = ?", { value, value, goalId, cid })
     if not updated then
         player.Functions.AddMoney('bank', value, 'bc-banking-savings-goal-refund')
         return
