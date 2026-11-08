@@ -16,7 +16,7 @@ V2 currently adds:
 - Multiple checking, savings and business accounts with separate balances and a transaction ledger.
 - Cash/bank funding and withdrawals, account transfers, statements and integration exports.
 - Savings goals and configurable daily savings interest.
-- Debit-card records, freeze/unfreeze, replacement, salted PIN hashes and failed-PIN lockout.
+- Physical-style and virtual card records, freeze/unfreeze, replacement, salted PIN hashes and failed-PIN lockout.
 - Personal and business loan applications, staff approval/rejection and repayments.
 - Business accounts, employee permissions, payroll and expense recording.
 - One-time, weekly and monthly scheduled account payments.
