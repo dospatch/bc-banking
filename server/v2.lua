@@ -5,6 +5,7 @@ BCBanking.V2 = BCBanking.V2 or {}
 local V2 = BCBanking.V2
 local function playerFor(src) return QBCore.Functions.GetPlayer(src) end
 local function cidFor(src)
+    if not BCBanking.V2Ready then return nil end
     local p = playerFor(src)
     return p and p.PlayerData and p.PlayerData.citizenid
 end
@@ -27,6 +28,7 @@ local function accountNumber()
     return nil
 end
 local function member(accountId, citizenid)
+    if not BCBanking.V2Ready then return nil end
     return MySQL.single.await([[
         SELECT m.*, a.account_type, a.account_number, a.display_name, a.balance, a.status AS account_status
         FROM bc_banking_v2_account_members m
@@ -42,6 +44,7 @@ local function logAudit(actor, action, target, details)
     ]], { actor, action, 'account', tostring(target or ''), json.encode(details or {}) })
 end
 local function createAccount(citizenid, kind, name, initial)
+    if not BCBanking.V2Ready then return nil, 'V2 database is not ready.' end
     local number = accountNumber()
     if not number then return nil, 'Could not allocate an account number.' end
     local id = MySQL.insert.await([[
@@ -358,6 +361,7 @@ end)
 
 -- Admin review commands are ACE-gated. Approval never runs from a client event.
 RegisterCommand('bcbankloan', function(src, args)
+    if not BCBanking.V2Ready then print('[bc-banking] V2 database is not ready.'); return end
     if src ~= 0 and not IsPlayerAceAllowed(src, 'bc-banking.admin') then return end
     local id, decision = tonumber(args[1]), tostring(args[2] or '')
     if not id or (decision ~= 'approve' and decision ~= 'reject') then
@@ -382,6 +386,7 @@ RegisterCommand('bcbankloan', function(src, args)
 end, true)
 
 exports('GetV2Accounts', function(citizenid)
+    if not BCBanking.V2Ready then return {} end
     return MySQL.query.await([[
         SELECT a.* FROM bc_banking_v2_accounts a
         JOIN bc_banking_v2_account_members m ON m.account_id = a.id
@@ -842,6 +847,7 @@ end)
 
 
 RegisterCommand('bcbankaccount', function(src, args)
+    if not BCBanking.V2Ready then print('[bc-banking] V2 database is not ready.'); return end
     if src ~= 0 and not IsPlayerAceAllowed(src, 'bc-banking.admin') then return end
     local id, action = tonumber(args[1]), tostring(args[2] or '')
     if not id or (action ~= 'freeze' and action ~= 'unfreeze' and action ~= 'close' and action ~= 'reopen') then
@@ -858,6 +864,7 @@ RegisterCommand('bcbankaccount', function(src, args)
 end, true)
 
 RegisterCommand('bcbankaudit', function(src, args)
+    if not BCBanking.V2Ready then print('[bc-banking] V2 database is not ready.'); return end
     if src ~= 0 and not IsPlayerAceAllowed(src, 'bc-banking.admin') then return end
     local citizenid = tostring(args[1] or '')
     if #citizenid < 2 then print('Usage: bcbankaudit <citizenid>'); return end
@@ -876,6 +883,7 @@ RegisterCommand('bcbankaudit', function(src, args)
 end, true)
 
 exports('SetV2AccountStatus', function(accountId, status, actor)
+    if not BCBanking.V2Ready then return false end
     if not ({ active=true, frozen=true, closed=true })[status] then return false end
     local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET status = ? WHERE id = ?', { status, accountId })
     if changed and changed > 0 then
