@@ -589,8 +589,10 @@ RegisterCommand('bcbankloan', function(src, args)
     end
     local loan = MySQL.single.await("SELECT * FROM bc_banking_v2_loans WHERE id = ? AND status = 'pending'", { id })
     if not loan then print('[bc-banking] Pending loan not found.'); return end
+    local actor = src == 0 and 'SERVER_CONSOLE' or (cidFor(src) or 'UNKNOWN')
     if decision == 'reject' then
-        MySQL.update.await("UPDATE bc_banking_v2_loans SET status = 'rejected', reviewed_at = CURRENT_TIMESTAMP WHERE id = ?", { id })
+        local rejected = MySQL.update.await("UPDATE bc_banking_v2_loans SET status = 'rejected', reviewed_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending'", { id })
+        if rejected and rejected > 0 then logAudit(actor, 'loan.rejected', id, { applicant=loan.citizenid }) end
     else
         local claimed = MySQL.update.await("UPDATE bc_banking_v2_loans SET status = 'processing' WHERE id = ? AND status = 'pending'", { id })
         if not claimed or claimed < 1 then print('[bc-banking] Loan application is no longer pending.'); return end
@@ -611,6 +613,10 @@ RegisterCommand('bcbankloan', function(src, args)
             print('[bc-banking] Loan activation failed; disbursement reversed.')
             return
         end
+        logAudit(actor, 'loan.approved', id, { applicant=loan.citizenid, principal=tonumber(loan.principal) })
+        pcall(function()
+            exports['bc-banking']:AddTransaction(loan.citizenid, 'loan_disbursement', tonumber(loan.principal), 'Loan disbursement')
+        end)
     end
     print(('[bc-banking] Loan %s %s.'):format(id, decision))
 end, true)
@@ -1384,12 +1390,20 @@ RegisterCommand('bcbankbusinessloan', function(src, args)
             return
         end
         local balance = MySQL.scalar.await('SELECT balance FROM bc_banking_v2_accounts WHERE id = ?', { business.account_id })
-        MySQL.insert.await([[
-            INSERT INTO bc_banking_v2_ledger (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description, metadata)
-            VALUES (?, ?, 'loan_disbursement', ?, ?, ?, 'Business loan disbursement', ?)
-        ]], { business.account_id, ('bizloan-start-%s'):format(id), loan.principal, balance, loan.applicant_citizenid, json.encode({ loan_id=id }) })
+        local ledgerOk = pcall(function()
+            MySQL.insert.await([[
+                INSERT INTO bc_banking_v2_ledger (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description, metadata)
+                VALUES (?, ?, 'loan_disbursement', ?, ?, ?, 'Business loan disbursement', ?)
+            ]], { business.account_id, ('bizloan-start-%s'):format(id), loan.principal, balance, loan.applicant_citizenid, json.encode({ loan_id=id }) })
+        end)
+        if not ledgerOk then
+            MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ?', { loan.principal, business.account_id })
+            MySQL.update.await("UPDATE bc_banking_v2_business_loans SET status = 'pending', monthly_payment = 0, balance_due = 0, reviewed_at = NULL, next_payment_at = NULL WHERE id = ? AND status = 'active'", { id })
+            print('[bc-banking] Business loan ledger write failed; disbursement was reversed.')
+            return
+        end
     end
-    logAudit(src == 0 and 'SERVER_CONSOLE' or (cidFor(src) or 'UNKNOWN'), 'business_loan.' .. decision, id, {})
+    logAudit(src == 0 and 'SERVER_CONSOLE' or (cidFor(src) or 'UNKNOWN'), 'business_loan.' .. decision, id, { business_id=loan.business_id, applicant=loan.applicant_citizenid })
     print(('[bc-banking] Business loan %s %s.'):format(id, decision))
 end, true)
 
