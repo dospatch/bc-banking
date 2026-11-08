@@ -27,6 +27,7 @@ exports('AddTransaction', function(citizenid, transactionType, amount, descripti
         end
 
         BCBanking.SendDiscordLog({
+            type = transactionType,
             title = 'Bank Transaction: ' .. tostring(transactionType),
             color = (transactionType == 'deposit' or transactionType == 'transfer_in') and 0x2ECC71 or 0xE67E22,
             fields = {
