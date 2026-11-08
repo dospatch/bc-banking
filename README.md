@@ -176,6 +176,8 @@ Config.TransferFee = 0
 Config.TransactionCooldown = 1000
 
 Config.TransactionHistoryLimit = 50
+
+Config.DiscordLogs = true
 ```
 
 ---
@@ -191,6 +193,29 @@ ensure bc-banking
 ```
 
 Make sure `qb-core`, `oxmysql`, and `ox_target` are started before BC-Banking. `ox_inventory` may also be started before it when used by your server.
+
+---
+
+# 🔔 Discord Transaction Logs
+
+BC-Banking can send successful deposits, withdrawals, outgoing transfers, incoming transfers, and transfer-fee records to a private Discord channel using a webhook.
+
+1. Create a Discord webhook in the staff/banking-log channel.
+2. Add the webhook URL to your server.cfg as a server convar (do not put the URL in config.lua or commit it to GitHub):
+
+```cfg
+set bc_banking_webhook "https://discord.com/api/webhooks/WEBHOOK_ID/WEBHOOK_TOKEN"
+```
+
+3. Keep Discord logging enabled in config.lua:
+
+```lua
+Config.DiscordLogs = true
+```
+
+Set it to `false` to disable Discord transaction logs. Restart BC-Banking after changing the configuration.
+
+The webhook URL is read server-side using GetConvar and is not included in client files. Discord logs contain the character name when online, citizen ID, amount, transaction description, related account, and transaction ID. Keep the destination channel private and limit access to trusted staff.
 
 ---
 
