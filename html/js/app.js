@@ -222,6 +222,16 @@ bindV2('createAccountButton', 'createV2Account', () => ({
     type: document.getElementById('newAccountType').value,
     name: document.getElementById('newAccountName').value.trim()
 }));
+bindV2('fundAccountButton', 'fundV2Account', () => ({
+    accountId: Number(document.getElementById('v2SourceAccount').value),
+    amount: Number(document.getElementById('fundAmount').value),
+    source: document.getElementById('fundSource').value
+}));
+bindV2('withdrawAccountButton', 'withdrawV2Account', () => ({
+    accountId: Number(document.getElementById('v2SourceAccount').value),
+    amount: Number(document.getElementById('accountWithdrawAmount').value),
+    destination: document.getElementById('withdrawDestination').value
+}));
 bindV2('v2TransferButton', 'v2Transfer', () => ({
     accountId: Number(document.getElementById('v2SourceAccount').value),
     recipient: document.getElementById('v2Recipient').value.trim(),
