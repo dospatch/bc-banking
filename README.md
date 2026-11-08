@@ -560,7 +560,7 @@ The resource uses QBCore for:
 * Server-side money operations
 * Player loading
 
-Bank and ATM interactions are handled by `ox_target`. The resource uses QBCore cash and bank money accounts as its authoritative balances. The `bc_banking_accounts.balance` column is a synchronized mirror, not a separate wallet. `ox_inventory` can run alongside it without creating a second cash balance. If your server has a custom inventory-item cash setup, that requires a dedicated money adapter.
+Bank and ATM interactions are handled by `ox_target`. The resource uses QBCore cash and bank money accounts as its authoritative balances. The `bc_banking_accounts.balance` column is a synchronized mirror, not a separate wallet. `ox_inventory` can run alongside it without creating a second cash balance. BC-Banking V1 reads and changes QBCore's `cash` and `bank` money accounts; it does not yet include a custom inventory-item cash adapter.
 
 BC-Banking initializes QBCore through:
 
@@ -629,7 +629,7 @@ local account = exports['bc-banking']:GetAccountByNumber(accountNumber)
 ### Create Account
 
 ```lua
-local account = exports['bc-banking']:CreateAccount(citizenid)
+local Player = QBCore.Functions.GetPlayer(source)\nlocal account = exports['bc-banking']:CreateAccount(Player)
 ```
 
 ---
