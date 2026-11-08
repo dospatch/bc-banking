@@ -2,8 +2,8 @@ local QBCore = exports['qb-core']:GetCoreObject()
 
 BCBanking = BCBanking or {}
 
-function BCBanking.OpenBank()
-    TriggerEvent('bc-banking:client:open')
+function BCBanking.OpenBank(isATM)
+    TriggerEvent('bc-banking:client:open', isATM == true)
 end
 
 function BCBanking.CloseBank()
