@@ -65,6 +65,16 @@ local function amount(value, max)
     if n <= 0 or (max and n > max) then return nil end
     return n
 end
+
+local function isNearConfiguredATM(src)
+    local ped = GetPlayerPed(src)
+    if not ped or ped == 0 then return false end
+    local coords = GetEntityCoords(ped)
+    for _, atmCoords in ipairs(Config.ATMLocations or {}) do
+        if #(coords - atmCoords) <= 3.0 then return true end
+    end
+    return false
+end
 local function accountNumber()
     local length = math.max(8, math.min(20, tonumber(Config.AccountNumberLength) or 10))
     for _ = 1, 20 do
@@ -1191,7 +1201,8 @@ RegisterNetEvent('bc-banking:v2:fundAccount', function(data)
     if not cid or type(data) ~= 'table' then return end
     local accountId, value = tonumber(data.accountId), amount(data.amount, tonumber(Config.MaxDeposit) or 1000000)
     local sourceType = data.source == 'cash' and 'cash' or (data.source == 'bank' and 'bank' or nil)
-    local fee = data.isATM == true and BCBanking.RoundMoney(Config.V2 and Config.V2.ATMDepositFee or 0) or 0
+    local usingATM = isNearConfiguredATM(src)
+    local fee = usingATM and BCBanking.RoundMoney(Config.V2 and Config.V2.ATMDepositFee or 0) or 0
     local total = value and (value + fee) or 0
     if not accountId or not value or not sourceType or fee < 0 then return end
     local access = member(accountId, cid)
@@ -1223,7 +1234,7 @@ RegisterNetEvent('bc-banking:v2:fundAccount', function(data)
             return false, 'Deposit could not be recorded and was reversed.'
         end
         completeIdempotency(idempotencyKey, { success=true })
-        logAudit(cid, 'account.deposit', accountId, { amount=value, source=sourceType, atm=data.isATM == true, fee=fee })
+        logAudit(cid, 'account.deposit', accountId, { amount=value, source=sourceType, atm=usingATM, fee=fee })
         if fee > 0 then pcall(function() exports['bc-banking']:AddTransaction(cid, 'fee', fee, 'V2 ATM deposit fee') end) end
         return true, 'Account funded.'
     end)
@@ -1237,7 +1248,8 @@ RegisterNetEvent('bc-banking:v2:withdrawAccount', function(data)
     if not cid or type(data) ~= 'table' then return end
     local accountId, value = tonumber(data.accountId), amount(data.amount, tonumber(Config.MaxWithdrawal) or 1000000)
     local destination = data.destination == 'cash' and 'cash' or (data.destination == 'bank' and 'bank' or nil)
-    local fee = data.isATM == true and BCBanking.RoundMoney(Config.V2 and Config.V2.ATMWithdrawalFee or 0) or 0
+    local usingATM = isNearConfiguredATM(src)
+    local fee = usingATM and BCBanking.RoundMoney(Config.V2 and Config.V2.ATMWithdrawalFee or 0) or 0
     local total = value and (value + fee) or 0
     if not accountId or not value or not destination or fee < 0 then return end
     local access = member(accountId, cid)
@@ -1277,7 +1289,7 @@ RegisterNetEvent('bc-banking:v2:withdrawAccount', function(data)
             return false, 'Withdrawal could not be recorded and was reversed.'
         end
         completeIdempotency(idempotencyKey, { success=true })
-        logAudit(cid, 'account.withdraw', accountId, { amount=value, destination=destination, atm=data.isATM == true, fee=fee })
+        logAudit(cid, 'account.withdraw', accountId, { amount=value, destination=destination, atm=usingATM, fee=fee })
         if fee > 0 then pcall(function() exports['bc-banking']:AddTransaction(cid, 'fee', fee, 'V2 ATM withdrawal fee') end) end
         return true, 'Withdrawal completed.'
     end)
