@@ -27,7 +27,8 @@ end)
 RegisterNUICallback('withdraw', function(data, cb)
     TriggerServerEvent(
         'bc-banking:server:withdraw',
-        tonumber(data.amount)
+        tonumber(data.amount),
+        data.isATM == true
     )
 
     cb('ok')
