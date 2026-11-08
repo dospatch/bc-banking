@@ -82,8 +82,10 @@ RegisterNetEvent('bc-banking:server:deposit', function(value, isATM)
             print(('[bc-banking] Deposit succeeded but transaction logging failed for %s.'):format(cid))
         end
 
-        if fee > 0 then pcall(function() exports['bc-banking']:AddTransaction(cid, 'fee', fee, 'ATM deposit fee') end) end
-        return true, fee > 0 and ('Deposit completed. ATM fee: ' .. (Config.Currency or '
+        if fee > 0 then
+            pcall(function() exports['bc-banking']:AddTransaction(cid, 'fee', fee, 'ATM deposit fee') end)
+        end
+        return true, 'Deposit completed.'
     end)
 
     notify(src, message or (ok and 'Deposit completed.' or 'Deposit failed.'), ok and 'success' or 'error')
@@ -144,142 +146,9 @@ RegisterNetEvent('bc-banking:server:withdraw', function(value, isATM)
             print(('[bc-banking] Withdrawal succeeded but transaction logging failed for %s.'):format(cid))
         end
 
-        if fee > 0 then pcall(function() exports['bc-banking']:AddTransaction(cid, 'fee', fee, 'ATM withdrawal fee') end) end
-        return true, fee > 0 and ('Withdrawal completed. ATM fee: ' .. (Config.Currency or '
-    end)
-
-    notify(src, message or (ok and 'Withdrawal completed.' or 'Withdrawal failed.'), ok and 'success' or 'error')
-end)
-) .. string.format('%.2f', fee)) or 'Deposit completed.'
-    end)
-
-    notify(src, message or (ok and 'Deposit completed.' or 'Deposit failed.'), ok and 'success' or 'error')
-end)
-
-RegisterNetEvent('bc-banking:server:withdraw', function(value)
-    local src = source
-    local initial = QBCore.Functions.GetPlayer(src)
-    if not initial then return end
-
-    local cid = initial.PlayerData.citizenid
-    if not BCBanking.CheckCooldown(cid) then
-        notify(src, 'Please wait a moment before making another banking request.')
-        return
-    end
-
-    local amount = validAmount(value, Config.MaxWithdrawal)
-    if not amount then
-        notify(src, 'Enter a valid withdrawal amount within the transaction limit.')
-        return
-    end
-
-    local ok, message = BCBanking.WithPlayerLocks({ cid }, function()
-        local Player = QBCore.Functions.GetPlayer(src)
-        if not Player or Player.PlayerData.citizenid ~= cid then
-            return false, 'Your banking session is no longer available.'
+        if fee > 0 then
+            pcall(function() exports['bc-banking']:AddTransaction(cid, 'fee', fee, 'ATM withdrawal fee') end)
         end
-
-        if (tonumber(Player.PlayerData.money.bank) or 0) < amount then
-            return false, 'Insufficient bank funds.'
-        end
-
-        local removed = safeMoneyCall(Player, 'RemoveMoney', 'bank', amount, 'bc-banking-withdraw')
-        if not removed then
-            return false, 'Bank funds could not be removed. No withdrawal was made.'
-        end
-
-        local credited = safeMoneyCall(Player, 'AddMoney', 'cash', amount, 'bc-banking-withdraw')
-        if not credited then
-            local refunded = refundOrLog(Player, 'bank', amount, 'bc-banking-withdraw-refund', cid)
-            return false, refunded
-                and 'Cash could not be credited. The withdrawal was reversed.'
-                or 'Withdrawal failed and refund could not be confirmed. Contact staff.'
-        end
-
-        local synced, syncError = pcall(function()
-            exports['bc-banking']:SyncAccountBalance(cid, Player.PlayerData.money.bank)
-        end)
-        if not synced then
-            print(('[bc-banking] Could not sync account balance mirror for %s: %s'):format(cid, syncError))
-        end
-
-        local logged, id = pcall(function()
-            return exports['bc-banking']:AddTransaction(cid, 'withdraw', amount, 'Cash withdrawal')
-        end)
-        if not logged or not id then
-            print(('[bc-banking] Withdrawal succeeded but transaction logging failed for %s.'):format(cid))
-        end
-
-        return true, 'Withdrawal completed.'
-    end)
-
-    notify(src, message or (ok and 'Withdrawal completed.' or 'Withdrawal failed.'), ok and 'success' or 'error')
-end)
-) .. string.format('%.2f', fee)) or 'Withdrawal completed.'
-    end)
-
-    notify(src, message or (ok and 'Withdrawal completed.' or 'Withdrawal failed.'), ok and 'success' or 'error')
-end)
-) .. string.format('%.2f', fee)) or 'Deposit completed.'
-    end)
-
-    notify(src, message or (ok and 'Deposit completed.' or 'Deposit failed.'), ok and 'success' or 'error')
-end)
-
-RegisterNetEvent('bc-banking:server:withdraw', function(value)
-    local src = source
-    local initial = QBCore.Functions.GetPlayer(src)
-    if not initial then return end
-
-    local cid = initial.PlayerData.citizenid
-    if not BCBanking.CheckCooldown(cid) then
-        notify(src, 'Please wait a moment before making another banking request.')
-        return
-    end
-
-    local amount = validAmount(value, Config.MaxWithdrawal)
-    if not amount then
-        notify(src, 'Enter a valid withdrawal amount within the transaction limit.')
-        return
-    end
-
-    local ok, message = BCBanking.WithPlayerLocks({ cid }, function()
-        local Player = QBCore.Functions.GetPlayer(src)
-        if not Player or Player.PlayerData.citizenid ~= cid then
-            return false, 'Your banking session is no longer available.'
-        end
-
-        if (tonumber(Player.PlayerData.money.bank) or 0) < amount then
-            return false, 'Insufficient bank funds.'
-        end
-
-        local removed = safeMoneyCall(Player, 'RemoveMoney', 'bank', amount, 'bc-banking-withdraw')
-        if not removed then
-            return false, 'Bank funds could not be removed. No withdrawal was made.'
-        end
-
-        local credited = safeMoneyCall(Player, 'AddMoney', 'cash', amount, 'bc-banking-withdraw')
-        if not credited then
-            local refunded = refundOrLog(Player, 'bank', amount, 'bc-banking-withdraw-refund', cid)
-            return false, refunded
-                and 'Cash could not be credited. The withdrawal was reversed.'
-                or 'Withdrawal failed and refund could not be confirmed. Contact staff.'
-        end
-
-        local synced, syncError = pcall(function()
-            exports['bc-banking']:SyncAccountBalance(cid, Player.PlayerData.money.bank)
-        end)
-        if not synced then
-            print(('[bc-banking] Could not sync account balance mirror for %s: %s'):format(cid, syncError))
-        end
-
-        local logged, id = pcall(function()
-            return exports['bc-banking']:AddTransaction(cid, 'withdraw', amount, 'Cash withdrawal')
-        end)
-        if not logged or not id then
-            print(('[bc-banking] Withdrawal succeeded but transaction logging failed for %s.'):format(cid))
-        end
-
         return true, 'Withdrawal completed.'
     end)
 
