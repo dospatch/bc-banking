@@ -104,8 +104,7 @@ local v2Events = {
     payroll = 'bc-banking:v2:payroll',
     createScheduledPayment = 'bc-banking:v2:createScheduledPayment',
     cancelScheduledPayment = 'bc-banking:v2:cancelScheduledPayment',
-    repayLoan = 'bc-banking:v2:repayLoan',
-    repayBusinessLoan = 'bc-banking:v2:repayBusinessLoan'
+    repayLoan = 'bc-banking:v2:repayLoan'
 }
 
 for callbackName, eventName in pairs(v2Events) do
