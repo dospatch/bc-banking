@@ -835,11 +835,18 @@ end
 
 CreateThread(function()
     Wait(5000)
-    MySQL.update.await("UPDATE bc_banking_v2_scheduled_payments SET status = 'failed' WHERE status = 'processing'")
+    if BCBanking.V2Ready then
+        local ok, err = pcall(function()
+            MySQL.update.await("UPDATE bc_banking_v2_scheduled_payments SET status = 'failed' WHERE status = 'processing'")
+        end)
+        if not ok then print(('[bc-banking] Scheduled payment recovery check failed: %s'):format(tostring(err))) end
+    end
     while true do
         Wait(60000)
-        local ok, err = pcall(processScheduledPayments)
-        if not ok then print(('[bc-banking] Scheduled payment processor failed: %s'):format(tostring(err))) end
+        if BCBanking.V2Ready then
+            local ok, err = pcall(processScheduledPayments)
+            if not ok then print(('[bc-banking] Scheduled payment processor failed: %s'):format(tostring(err))) end
+        end
     end
 end)
 
