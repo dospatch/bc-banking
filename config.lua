@@ -23,8 +23,19 @@ Config.TransactionCooldown = 1000
 
 Config.TransactionHistoryLimit = 50
 
--- Discord logs are sent server-side. Keep the webhook URL in server.cfg, never here.
+-- Discord transaction logs. Set to false to disable all Discord logging.
 Config.DiscordLogs = true
+
+-- Webhook destinations are loaded from config.private.lua (local only, never commit it).
+-- Copy config.private.example.lua to config.private.lua and add your own Discord webhook URLs.
+Config.DiscordWebhooks = {
+    general = '',
+    deposits = '',
+    withdrawals = '',
+    transfers = '',
+    fees = '',
+    other = ''
+}
 
 Config.BankLocations = {
     vector3(149.55, -1040.7, 29.37),
