@@ -147,6 +147,62 @@
 
                 </section>
 
+
+                <section class="transactions v2-section">
+                    <div class="section-header">
+                        <div><h2>BC-Banking V2</h2><p>Accounts, savings, cards, loans and business banking</p></div>
+                    </div>
+                    <div class="v2-grid">
+                        <div class="panel">
+                            <h2>Multiple Accounts</h2>
+                            <div id="v2Accounts" class="v2-list">Loading accounts…</div>
+                            <select id="newAccountType"><option value="checking">Checking</option><option value="savings">Savings</option></select>
+                            <input id="newAccountName" maxlength="80" placeholder="Account name">
+                            <button id="createAccountButton">Open Account</button>
+                            <input id="v2Recipient" maxlength="24" placeholder="Recipient account number">
+                            <input id="v2TransferAmount" type="number" min="0.01" step="0.01" placeholder="Transfer amount">
+                            <input id="v2TransferDescription" maxlength="100" placeholder="Transfer note">
+                            <button id="v2TransferButton">Transfer Between Accounts</button>
+                        </div>
+                        <div class="panel">
+                            <h2>Savings Goals</h2>
+                            <div id="v2Goals" class="v2-list">Loading goals…</div>
+                            <input id="goalName" maxlength="80" placeholder="Goal name">
+                            <input id="goalTarget" type="number" min="0.01" step="0.01" placeholder="Target amount">
+                            <button id="createGoalButton">Create Goal</button>
+                            <input id="goalId" type="number" min="1" placeholder="Goal ID">
+                            <input id="goalContribution" type="number" min="0.01" step="0.01" placeholder="Contribution">
+                            <button id="contributeGoalButton">Contribute from Bank</button>
+                        </div>
+                        <div class="panel">
+                            <h2>Bank Cards</h2>
+                            <div id="v2Cards" class="v2-list">Loading cards…</div>
+                            <input id="cardAccountId" type="number" min="1" placeholder="V2 account ID">
+                            <button id="issueCardButton">Issue Debit Card</button>
+                            <p class="muted small">Card numbers and PINs are not displayed or stored in plaintext. This release issues a card record and supports freeze/unfreeze.</p>
+                        </div>
+                        <div class="panel">
+                            <h2>Loans</h2>
+                            <div id="v2Loans" class="v2-list">Loading applications…</div>
+                            <input id="loanAmount" type="number" min="0.01" step="0.01" placeholder="Loan amount">
+                            <input id="loanMonths" type="number" min="1" max="24" placeholder="Term in months">
+                            <button id="applyLoanButton">Apply for Loan</button>
+                            <p class="muted small">Applications require staff review. Admin command: /bcbankloan ID approve|reject</p>
+                        </div>
+                        <div class="panel">
+                            <h2>Business Banking</h2>
+                            <div id="v2Businesses" class="v2-list">Loading businesses…</div>
+                            <input id="businessName" maxlength="80" placeholder="Business name">
+                            <button id="createBusinessButton">Create Business Account</button>
+                            <input id="businessId" type="number" min="1" placeholder="Business ID">
+                            <input id="employeeCitizenId" maxlength="50" placeholder="Employee citizen ID">
+                            <input id="employeeAmount" type="number" min="0.01" step="0.01" placeholder="Payroll amount">
+                            <button id="payrollButton">Send Payroll</button>
+                            <p class="muted small">Owners can grant employee access through the server API. Payroll is permission-checked and audited.</p>
+                        </div>
+                    </div>
+                </section>
+
             </main>
 
             <footer>
