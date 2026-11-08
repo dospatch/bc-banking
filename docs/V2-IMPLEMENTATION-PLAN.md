@@ -1,6 +1,6 @@
 # BC-Banking V2.0.0 — Implementation Plan
 
-Status: approved scope; implementation in progress on `feature/bc-banking-v2`.
+Status: V2 feature implementation in progress on `feature/bc-banking-v2`; not production-ready or released.
 Stable V1 branch: `main` (do not modify during V2 development).
 
 ## Repository baseline inspected
@@ -81,3 +81,10 @@ The existing `bc_banking_accounts` and `bc_banking_transactions` tables remain i
 - Never claim runtime-tested behavior without a real server test.
 - Keep V1 backup and rollback instructions.
 - Any irreversible or balance-affecting migration must be explicitly reviewed before execution.
+
+
+## Implementation progress
+
+Implemented in the V2 branch: additive account, membership, ledger, idempotency, savings goal/interest, card/security, loan, business, payroll, expense, scheduled-payment and audit tables; multiple accounts; funding/withdrawals; transfers; savings goals and daily interest; card issue/freeze/replacement/PIN lockout; loan applications/approval/repayment; business employee permissions/payroll/expenses; scheduled payments; statement and BC Systems exports; admin controls; and NUI panels.
+
+Still required before V2.0.0 release: full FiveM runtime tests on target QBCore/oxmysql versions; migration rehearsal on a copy of a real V1 database; restore/rollback verification; security review of all money-moving operations and offline player balance updates; UI end-to-end checks; scheduled payment recovery checks; and confirmation of all 20 approved requirements. No runtime test is claimed to have passed. Do not tag or publish a release until these gates pass.
