@@ -42,7 +42,8 @@ server_scripts {
     'server/v2_savings.lua',
     'server/v2_cards.lua',
     'server/v2_business.lua',
-    'server/v2_loans.lua'
+    'server/v2_loans.lua',
+    'server/v2_scheduled.lua'
 }
 
 ui_page 'html/index.html'
