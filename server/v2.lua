@@ -838,3 +838,48 @@ RegisterNetEvent('bc-banking:v2:withdrawAccount', function(data)
     TriggerClientEvent('bc-banking:client:notify', src, message or (ok and 'Withdrawal completed.' or 'Withdrawal failed.'), ok and 'success' or 'error')
     TriggerClientEvent('bc-banking:client:v2:refresh', src)
 end)
+
+
+RegisterCommand('bcbankaccount', function(src, args)
+    if src ~= 0 and not IsPlayerAceAllowed(src, 'bc-banking.admin') then return end
+    local id, action = tonumber(args[1]), tostring(args[2] or '')
+    if not id or (action ~= 'freeze' and action ~= 'unfreeze' and action ~= 'close' and action ~= 'reopen') then
+        print('Usage: bcbankaccount <accountId> <freeze|unfreeze|close|reopen>'); return
+    end
+    local status = ({ freeze='frozen', unfreeze='active', close='closed', reopen='active' })[action]
+    local account = MySQL.single.await('SELECT id, owner_citizenid, status FROM bc_banking_v2_accounts WHERE id = ?', { id })
+    if not account then print('[bc-banking] V2 account not found.'); return end
+    local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET status = ? WHERE id = ?', { status, id })
+    if changed and changed > 0 then
+        logAudit(src == 0 and 'SERVER_CONSOLE' or (cidFor(src) or 'UNKNOWN'), 'admin.account_' .. action, id, { previous=account.status, current=status })
+        print(('[bc-banking] Account %s status changed to %s.'):format(id, status))
+    end
+end, true)
+
+RegisterCommand('bcbankaudit', function(src, args)
+    if src ~= 0 and not IsPlayerAceAllowed(src, 'bc-banking.admin') then return end
+    local citizenid = tostring(args[1] or '')
+    if #citizenid < 2 then print('Usage: bcbankaudit <citizenid>'); return end
+    local rows = MySQL.query.await([[
+        SELECT actor_citizenid, action, target_type, target_id, details, created_at
+        FROM bc_banking_v2_audit
+        WHERE actor_citizenid = ? OR (target_type = 'account' AND target_id IN (
+            SELECT CAST(id AS CHAR) FROM bc_banking_v2_accounts WHERE owner_citizenid = ?
+        ))
+        ORDER BY id DESC LIMIT 25
+    ]], { citizenid, citizenid }) or {}
+    print(('[bc-banking] Audit records for %s: %s'):format(citizenid, #rows))
+    for _, row in ipairs(rows) do
+        print(('%s | %s | %s:%s | %s'):format(tostring(row.created_at), row.action, row.target_type, row.target_id, tostring(row.details or '{}')))
+    end
+end, true)
+
+exports('SetV2AccountStatus', function(accountId, status, actor)
+    if not ({ active=true, frozen=true, closed=true })[status] then return false end
+    local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET status = ? WHERE id = ?', { status, accountId })
+    if changed and changed > 0 then
+        logAudit(tostring(actor or 'SYSTEM'), 'account.status_changed', accountId, { status=status })
+        return true
+    end
+    return false
+end)
