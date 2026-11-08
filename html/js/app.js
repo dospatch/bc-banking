@@ -13,7 +13,8 @@ const resourceName = typeof GetParentResourceName === 'function'
     ? GetParentResourceName()
     : 'bc-banking';
 
-let currencySymbol = '
+let currencySymbol = '$';
+
     const amount = Number(value || 0);
     const formatted = new Intl.NumberFormat('en-US', {
         minimumFractionDigits: 2,
