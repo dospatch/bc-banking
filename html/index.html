@@ -219,11 +219,25 @@
                     </div>
                 </section>
 
+                <section class="transactions v2-section">
+                    <div class="section-header"><div><h2>Scheduled Payments</h2><p>One-time, weekly and monthly transfers between your V2 accounts</p></div></div>
+                    <div id="v2Schedules" class="v2-list">Loading scheduled payments…</div>
+                    <div class="v2-grid"><div class="panel">
+                        <input id="scheduleSource" type="number" min="1" placeholder="Source account ID">
+                        <input id="scheduleDestination" type="number" min="1" placeholder="Destination account ID">
+                        <input id="scheduleAmount" type="number" min="0.01" step="0.01" placeholder="Amount">
+                        <input id="scheduleDate" type="datetime-local">
+                        <select id="scheduleFrequency"><option value="once">One time</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select>
+                        <input id="scheduleDescription" maxlength="120" placeholder="Payment description">
+                        <button id="createScheduleButton">Schedule Payment</button>
+                    </div></div>
+                </section>
+
             </main>
 
             <footer>
                 <span>BCGAMING</span>
-                <span>BC-Banking v1.0.0</span>
+                <span>BC-Banking v2.0.0-dev</span>
             </footer>
 
         </div>
