@@ -316,6 +316,20 @@ bindV2('createScheduleButton', 'createScheduledPayment', () => ({
     description: document.getElementById('scheduleDescription').value.trim()
 }));
 
+document.getElementById('refreshLedgerButton').addEventListener('click', async () => {
+    const accountId = Number(document.getElementById('v2SourceAccount').value);
+    if (!accountId) {
+        listRows('v2Ledger', [], () => '', 'Select an account first.');
+        return;
+    }
+    const entries = await nui('v2Ledger', { accountId });
+    listRows('v2Ledger', entries, entry =>
+        '<strong>' + escapeHtml(entry.entry_type) + ' • ' + money(entry.amount) +
+        '</strong><span>' + escapeHtml(entry.description || 'Account activity') +
+        ' • ' + escapeHtml(entry.created_at) + '</span><b>Balance after: ' +
+        money(entry.balance_after) + '</b>', 'No statement entries found.');
+});
+
 document.addEventListener('click', async event => {
     const cardButton = event.target.closest('[data-card-id]');
     if (cardButton) {
