@@ -171,6 +171,51 @@ local statements = {
             PRIMARY KEY (id), KEY idx_bc_v2_audit_actor (actor_citizenid, created_at),
             KEY idx_bc_v2_audit_target (target_type, target_id, created_at)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ]],
+    [[
+        CREATE TABLE IF NOT EXISTS bc_banking_v2_interest_accruals (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            account_id BIGINT UNSIGNED NOT NULL,
+            accrual_date DATE NOT NULL,
+            annual_rate DECIMAL(7,3) NOT NULL,
+            amount DECIMAL(15,2) NOT NULL,
+            balance_after DECIMAL(15,2) NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id), UNIQUE KEY uq_bc_v2_interest_day (account_id, accrual_date),
+            CONSTRAINT fk_bc_v2_interest_account FOREIGN KEY (account_id) REFERENCES bc_banking_v2_accounts(id) ON DELETE RESTRICT
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ]],
+    [[
+        CREATE TABLE IF NOT EXISTS bc_banking_v2_scheduled_payments (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            owner_citizenid VARCHAR(50) NOT NULL,
+            source_account_id BIGINT UNSIGNED NOT NULL,
+            destination_account_id BIGINT UNSIGNED NOT NULL,
+            amount DECIMAL(15,2) NOT NULL,
+            description VARCHAR(120) NOT NULL,
+            frequency VARCHAR(16) NOT NULL DEFAULT 'once',
+            next_run_at DATETIME NOT NULL,
+            status VARCHAR(16) NOT NULL DEFAULT 'active',
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id), KEY idx_bc_v2_schedule_due (status, next_run_at),
+            KEY idx_bc_v2_schedule_owner (owner_citizenid, status),
+            CONSTRAINT fk_bc_v2_schedule_source FOREIGN KEY (source_account_id) REFERENCES bc_banking_v2_accounts(id) ON DELETE RESTRICT,
+            CONSTRAINT fk_bc_v2_schedule_dest FOREIGN KEY (destination_account_id) REFERENCES bc_banking_v2_accounts(id) ON DELETE RESTRICT
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ]],
+    [[
+        CREATE TABLE IF NOT EXISTS bc_banking_v2_business_expenses (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            business_id BIGINT UNSIGNED NOT NULL,
+            actor_citizenid VARCHAR(50) NOT NULL,
+            amount DECIMAL(15,2) NOT NULL,
+            category VARCHAR(48) NOT NULL,
+            description VARCHAR(255) DEFAULT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id), KEY idx_bc_v2_expense_business (business_id, created_at),
+            CONSTRAINT fk_bc_v2_expense_business FOREIGN KEY (business_id) REFERENCES bc_banking_v2_businesses(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     ]]
 }
 
@@ -184,7 +229,7 @@ function Migration.Apply()
             INSERT INTO bc_banking_schema_versions (version, name)
             VALUES (?, ?)
             ON DUPLICATE KEY UPDATE name = VALUES(name)
-        ]], { 2, 'v2_full_banking_schema' })
+        ]], { 2, 'v2_full_banking_schema_2' })
     end)
 
     if not ok then
