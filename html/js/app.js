@@ -176,6 +176,18 @@ async function refreshV2() {
     const [accounts, goals, cards, loans, businesses] = await Promise.all([
         nui('v2Accounts'), nui('v2Goals'), nui('v2Cards'), nui('v2Loans'), nui('v2Businesses')
     ]);
+    const sourceSelect = document.getElementById('v2SourceAccount');
+    if (sourceSelect) {
+        const current = sourceSelect.value;
+        sourceSelect.innerHTML = '<option value="">Select source account</option>';
+        (accounts || []).forEach(a => {
+            const option = document.createElement('option');
+            option.value = a.id;
+            option.textContent = a.display_name + ' • ' + a.account_number + ' • ' + money(a.balance);
+            sourceSelect.appendChild(option);
+        });
+        if (current) sourceSelect.value = current;
+    }
     listRows('v2Accounts', accounts, a =>
         '<strong>' + escapeHtml(a.display_name) + '</strong><span>' + escapeHtml(a.account_type) + ' • ' +
         escapeHtml(a.account_number) + '</span><b>' + money(a.balance) + '</b>', 'No additional accounts yet.');
@@ -209,7 +221,7 @@ bindV2('createAccountButton', 'createV2Account', () => ({
     name: document.getElementById('newAccountName').value.trim()
 }));
 bindV2('v2TransferButton', 'v2Transfer', () => ({
-    accountId: Number(document.getElementById('v2TransferAmount').dataset.accountId || 0),
+    accountId: Number(document.getElementById('v2SourceAccount').value),
     recipient: document.getElementById('v2Recipient').value.trim(),
     amount: Number(document.getElementById('v2TransferAmount').value),
     description: document.getElementById('v2TransferDescription').value.trim()
