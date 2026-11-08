@@ -413,16 +413,25 @@ RegisterCommand('bcbankloan', function(src, args)
     if decision == 'reject' then
         MySQL.update.await("UPDATE bc_banking_v2_loans SET status = 'rejected', reviewed_at = CURRENT_TIMESTAMP WHERE id = ?", { id })
     else
+        local claimed = MySQL.update.await("UPDATE bc_banking_v2_loans SET status = 'processing' WHERE id = ? AND status = 'pending'", { id })
+        if not claimed or claimed < 1 then print('[bc-banking] Loan application is no longer pending.'); return end
         local payment = loan.principal * (1 + (loan.apr / 100) * (loan.term_months / 12)) / loan.term_months
         local player = QBCore.Functions.GetPlayerByCitizenId(loan.citizenid)
         if player then
             local paid = player.Functions.AddMoney('bank', tonumber(loan.principal), 'bc-banking-loan-disbursement')
-            if not paid then print('[bc-banking] Loan disbursement failed; application left pending.'); return end
+            if not paid then MySQL.update.await("UPDATE bc_banking_v2_loans SET status = 'pending' WHERE id = ? AND status = 'processing'", { id }); print('[bc-banking] Loan disbursement failed; application left pending.'); return end
         else
             local changed = MySQL.update.await("UPDATE players SET money = JSON_SET(money, '$.bank', COALESCE(JSON_EXTRACT(money, '$.bank'), 0) + ?) WHERE citizenid = ?", { loan.principal, loan.citizenid })
-            if not changed or changed < 1 then print('[bc-banking] Loan disbursement failed; application left pending.'); return end
+            if not changed or changed < 1 then MySQL.update.await("UPDATE bc_banking_v2_loans SET status = 'pending' WHERE id = ? AND status = 'processing'", { id }); print('[bc-banking] Loan disbursement failed; application left pending.'); return end
         end
-        MySQL.update.await("UPDATE bc_banking_v2_loans SET status = 'active', monthly_payment = ?, balance_due = principal * (1 + (apr / 100) * (term_months / 12)), reviewed_at = CURRENT_TIMESTAMP, next_payment_at = DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 1 MONTH) WHERE id = ?", { payment, id })
+        local finalized = MySQL.update.await("UPDATE bc_banking_v2_loans SET status = 'active', monthly_payment = ?, balance_due = principal * (1 + (apr / 100) * (term_months / 12)), reviewed_at = CURRENT_TIMESTAMP, next_payment_at = DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 1 MONTH) WHERE id = ? AND status = 'processing'", { payment, id })
+        if not finalized or finalized < 1 then
+            if player then player.Functions.RemoveMoney('bank', tonumber(loan.principal), 'bc-banking-loan-reversal')
+            else MySQL.update.await("UPDATE players SET money = JSON_SET(money, '$.bank', GREATEST(0, COALESCE(JSON_EXTRACT(money, '$.bank'), 0) - ?)) WHERE citizenid = ?", { loan.principal, loan.citizenid }) end
+            MySQL.update.await("UPDATE bc_banking_v2_loans SET status = 'pending' WHERE id = ? AND status = 'processing'", { id })
+            print('[bc-banking] Loan activation failed; disbursement reversed.')
+            return
+        end
     end
     print(('[bc-banking] Loan %s %s.'):format(id, decision))
 end, true)
@@ -1054,13 +1063,22 @@ RegisterCommand('bcbankbusinessloan', function(src, args)
     if decision == 'reject' then
         MySQL.update.await("UPDATE bc_banking_v2_business_loans SET status = 'rejected', reviewed_at = CURRENT_TIMESTAMP WHERE id = ?", { id })
     else
+        local claimed = MySQL.update.await("UPDATE bc_banking_v2_business_loans SET status = 'processing' WHERE id = ? AND status = 'pending'", { id })
+        if not claimed or claimed < 1 then print('[bc-banking] Business loan application is no longer pending.'); return end
         local business = MySQL.single.await("SELECT account_id FROM bc_banking_v2_businesses WHERE id = ? AND status = 'active'", { loan.business_id })
-        if not business or not business.account_id then print('[bc-banking] Business account unavailable; loan left pending.'); return end
+        if not business or not business.account_id then MySQL.update.await("UPDATE bc_banking_v2_business_loans SET status = 'pending' WHERE id = ? AND status = 'processing'", { id }); print('[bc-banking] Business account unavailable; loan left pending.'); return end
         local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ? AND status = "active"', { loan.principal, business.account_id })
-        if not changed or changed < 1 then print('[bc-banking] Business loan disbursement failed.'); return end
+        if not changed or changed < 1 then MySQL.update.await("UPDATE bc_banking_v2_business_loans SET status = 'pending' WHERE id = ? AND status = 'processing'", { id }); print('[bc-banking] Business loan disbursement failed.'); return end
         local monthly = loan.principal * (1 + (loan.apr / 100) * (loan.term_months / 12)) / loan.term_months
         local total = loan.principal * (1 + (loan.apr / 100) * (loan.term_months / 12))
-        MySQL.update.await("UPDATE bc_banking_v2_business_loans SET status = 'active', monthly_payment = ?, balance_due = ?, reviewed_at = CURRENT_TIMESTAMP, next_payment_at = DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 1 MONTH) WHERE id = ?", { monthly, total, id })
+        MySQL.update.await("UPDATE bc_banking_v2_business_loans SET status = 'active', monthly_payment = ?, balance_due = ?, reviewed_at = CURRENT_TIMESTAMP, next_payment_at = DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 1 MONTH) WHERE id = ? AND status = 'processing'", { monthly, total, id })
+        local finalized = MySQL.scalar.await("SELECT status FROM bc_banking_v2_business_loans WHERE id = ?", { id })
+        if finalized ~= 'active' then
+            MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ?', { loan.principal, business.account_id })
+            MySQL.update.await("UPDATE bc_banking_v2_business_loans SET status = 'pending' WHERE id = ? AND status = 'processing'", { id })
+            print('[bc-banking] Business loan activation failed; disbursement reversed.')
+            return
+        end
         local balance = MySQL.scalar.await('SELECT balance FROM bc_banking_v2_accounts WHERE id = ?', { business.account_id })
         MySQL.insert.await([[
             INSERT INTO bc_banking_v2_ledger (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description, metadata)
