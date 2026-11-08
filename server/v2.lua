@@ -99,6 +99,7 @@ QBCore.Functions.CreateCallback('bc-banking:v2:getAccounts', function(src, cb)
         FROM bc_banking_v2_accounts a
         JOIN bc_banking_v2_account_members m ON m.account_id = a.id
         WHERE m.citizenid = ? AND m.status = 'active' AND a.status = 'active'
+          AND JSON_UNQUOTE(JSON_EXTRACT(m.permissions, '$.view')) = 'true'
         ORDER BY a.id ASC
     ]], { cid }) or {})
 end)
@@ -307,6 +308,7 @@ QBCore.Functions.CreateCallback('bc-banking:v2:getBusinesses', function(src, cb)
         FROM bc_banking_v2_businesses b
         JOIN bc_banking_v2_business_members m ON m.business_id = b.id
         WHERE m.citizenid = ? AND m.status = 'active' AND b.status = 'active'
+          AND JSON_UNQUOTE(JSON_EXTRACT(m.permissions, '$.view')) = 'true'
     ]], { cid }) or {})
 end)
 
@@ -442,6 +444,7 @@ exports('GetV2Accounts', function(citizenid)
         SELECT a.* FROM bc_banking_v2_accounts a
         JOIN bc_banking_v2_account_members m ON m.account_id = a.id
         WHERE m.citizenid = ? AND m.status = 'active' AND a.status = 'active'
+          AND JSON_UNQUOTE(JSON_EXTRACT(m.permissions, '$.view')) = 'true'
     ]], { citizenid }) or {}
 end)
 
@@ -983,6 +986,7 @@ QBCore.Functions.CreateCallback('bc-banking:v2:getBusinessLoans', function(src, 
         JOIN bc_banking_v2_businesses b ON b.id = l.business_id
         JOIN bc_banking_v2_business_members m ON m.business_id = b.id
         WHERE m.citizenid = ? AND m.status = 'active'
+          AND JSON_UNQUOTE(JSON_EXTRACT(m.permissions, '$.view')) = 'true'
         ORDER BY l.id DESC
     ]], { cid }) or {})
 end)
@@ -1094,8 +1098,10 @@ QBCore.Functions.CreateCallback('bc-banking:v2:getBusinessExpenses', function(sr
     local cid = cidFor(src)
     businessId = tonumber(businessId)
     if not cid or not businessId then cb({}); return end
-    local membership = MySQL.single.await("SELECT id FROM bc_banking_v2_business_members WHERE business_id = ? AND citizenid = ? AND status = 'active'", { businessId, cid })
+    local membership = MySQL.single.await("SELECT permissions FROM bc_banking_v2_business_members WHERE business_id = ? AND citizenid = ? AND status = 'active'", { businessId, cid })
     if not membership then cb({}); return end
+    local permissions = type(membership.permissions) == 'table' and membership.permissions or json.decode(membership.permissions or '{}') or {}
+    if not permissions.view then cb({}); return end
     cb(MySQL.query.await([[
         SELECT id, amount, category, description, actor_citizenid, created_at
         FROM bc_banking_v2_business_expenses WHERE business_id = ?
