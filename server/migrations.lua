@@ -1,4 +1,6 @@
 local Migration = {}
+BCBanking = BCBanking or {}
+BCBanking.V2Ready = false
 
 local statements = {
     [[
@@ -232,6 +234,11 @@ local statements = {
 }
 
 function Migration.Apply()
+    if not Config.V2 or Config.V2.Enabled ~= true then
+        BCBanking.V2Ready = false
+        print('[bc-banking] V2 is disabled in config; V1 remains active.')
+        return false
+    end
     local ok, err = pcall(function()
         for _, statement in ipairs(statements) do
             MySQL.query.await(statement)
@@ -250,7 +257,8 @@ function Migration.Apply()
         return false
     end
 
-    print('[bc-banking] Database schema migration v2 foundation is ready.')
+    BCBanking.V2Ready = true
+    print('[bc-banking] V2 database schema migration is ready.')
     return true
 end
 
