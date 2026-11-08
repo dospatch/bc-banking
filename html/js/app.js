@@ -14,7 +14,9 @@ const resourceName = typeof GetParentResourceName === 'function'
     : 'bc-banking';
 
 let currencySymbol = '$';
+let currentIsATM = false;
 
+function money(value) {
     const amount = Number(value || 0);
     const formatted = new Intl.NumberFormat('en-US', {
         minimumFractionDigits: 2,
