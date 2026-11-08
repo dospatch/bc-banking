@@ -703,8 +703,18 @@ RegisterNetEvent('bc-banking:v2:replaceCard', function(data)
     local card = MySQL.single.await("SELECT account_id FROM bc_banking_v2_cards WHERE id = ? AND citizenid = ? AND status IN ('active','frozen')", { oldId, cid })
     if not card then return end
     MySQL.update.await("UPDATE bc_banking_v2_cards SET status = 'replaced' WHERE id = ? AND citizenid = ?", { oldId, cid })
-    TriggerEvent('bc-banking:v2:issueCard:internal', src, cid, card.account_id)
-    logAudit(cid, 'card.replaced', oldId, {})
+    local nonce, salt = '', tostring(math.random(100000,999999)) .. tostring(os.time()) .. tostring(math.random(100000,999999))
+    for _ = 1, 32 do nonce = nonce .. tostring(math.random(0,9)) end
+    local last4 = nonce:sub(-4)
+    local newId = MySQL.insert.await([[INSERT INTO bc_banking_v2_cards
+        (citizenid, account_id, card_hash, card_last4, card_type, status, expires_at)
+        VALUES (?, ?, SHA2(CONCAT(?, ?, ?), 256), ?, 'debit', 'active', DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 4 YEAR))
+    ]], { cid, card.account_id, nonce, salt, tostring(Config.V2 and Config.V2.CardPepper or ''), last4 })
+    if newId then
+        MySQL.insert.await('INSERT INTO bc_banking_v2_card_secrets (card_id, pin_salt) VALUES (?, ?)', { newId, salt })
+        logAudit(cid, 'card.replaced', oldId, { new_card_id=newId, last4=last4 })
+        TriggerClientEvent('bc-banking:client:notify', src, 'Replacement card issued ending in ' .. last4 .. '.', 'success')
+    end
 end)
 
 exports('VerifyCardPin', function(cardId, citizenid, pin)
