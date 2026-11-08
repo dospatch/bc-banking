@@ -525,6 +525,7 @@ end)
 -- Interest is accrued once per account per server-local calendar day. A unique
 -- account/date key makes repeated resource restarts safe against double credit.
 local function accrueSavingsInterest()
+    if not BCBanking.V2Ready then return end
     local rate = math.max(0, tonumber(Config.V2 and Config.V2.SavingsAPR) or 0)
     if rate <= 0 then return end
     local accounts = MySQL.query.await("SELECT id, balance FROM bc_banking_v2_accounts WHERE account_type = 'savings' AND status = 'active' AND balance > 0") or {}
@@ -567,6 +568,7 @@ end)
 -- Server-side payment source API for BC resources. Client requests never decide
 -- whether funds exist; this export resolves the player's live QBCore balance.
 exports('ChargePlayer', function(source, value, paymentSource, reason)
+    if not BCBanking.V2Ready then return false, 'v2_not_ready' end
     local player = playerFor(source)
     local n = amount(value, tonumber(Config.V2 and Config.V2.MaxPayment) or 1000000)
     if not player or not n then return false, 'invalid_request' end
@@ -737,6 +739,7 @@ RegisterNetEvent('bc-banking:v2:replaceCard', function(data)
 end)
 
 exports('VerifyCardPin', function(cardId, citizenid, pin)
+    if not BCBanking.V2Ready then return false end
     pin = tostring(pin or '')
     if not tostring(pin):match('^%d%d%d%d%d?%d?$') then return false end
     local row = MySQL.single.await([[
