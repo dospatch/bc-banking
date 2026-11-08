@@ -14,6 +14,8 @@
 - Create checking/savings accounts; reject invalid types and account-limit overflow.
 - Attempt another citizen's account ID; expect denial.
 - Deposit from cash/bank and withdraw to cash/bank; verify each balance changes once.
+- At configured ATM coordinates, verify V2 deposit/withdraw fees apply; at bank branches and away from ATMs, verify ATM fees do not apply.
+- Forge the client `isATM` flag and verify the server uses player proximity rather than trusting the client.
 - Test invalid, non-finite, over-limit and insufficient-funds amounts.
 - Test owned-account and other-character transfers, self-transfer denial, and ledger failure reversal.
 - Verify statements, balance-after values and date filters.
