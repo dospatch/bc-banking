@@ -150,7 +150,7 @@ function listRows(target, rows, renderRow, empty) {
 async function refreshV2() {
     const results = await Promise.all([
         nui('v2Accounts'), nui('v2Goals'), nui('v2Cards'), nui('v2Loans'),
-        nui('v2Businesses'), nui('v2ScheduledPayments'), nui('v2BusinessLoans'), nui('v2BusinessExpenses', { businessId: Number(document.getElementById('businessId').value) })
+        nui('v2Businesses'), nui('v2ScheduledPayments'), nui('v2BusinessLoans')
     ]);
     const accounts = results[0] || [];
     const goals = results[1] || [];
@@ -159,7 +159,9 @@ async function refreshV2() {
     const businesses = results[4] || [];
     const schedules = results[5] || [];
     const businessLoans = results[6] || [];
-    const businessExpenses = results[7] || [];
+    const businessIdInput = document.getElementById('businessId');
+    if (businessIdInput && !businessIdInput.value && businesses.length) businessIdInput.value = businesses[0].id;
+    const businessExpenses = await nui('v2BusinessExpenses', { businessId: Number(businessIdInput && businessIdInput.value) });
 
     const sourceSelect = document.getElementById('v2SourceAccount');
     if (sourceSelect) {
