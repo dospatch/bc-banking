@@ -1,7 +1,15 @@
 -- Discord webhook logging for BC-Banking.
--- Configure the secret URL in server.cfg:
+-- Keep webhook URLs in server.cfg; never commit them to the repository.
+--
+-- Optional general destination (receives every transaction):
 -- set bc_banking_webhook "https://discord.com/api/webhooks/ID/TOKEN"
--- Do not put the webhook URL in config.lua or commit it to GitHub.
+--
+-- Optional category destinations:
+-- set bc_banking_webhook_deposits "https://discord.com/api/webhooks/ID/TOKEN"
+-- set bc_banking_webhook_withdrawals "https://discord.com/api/webhooks/ID/TOKEN"
+-- set bc_banking_webhook_transfers "https://discord.com/api/webhooks/ID/TOKEN"
+-- set bc_banking_webhook_fees "https://discord.com/api/webhooks/ID/TOKEN"
+-- set bc_banking_webhook_other "https://discord.com/api/webhooks/ID/TOKEN"
 
 local function clean(value, maxLength)
     local text = tostring(value or 'N/A')
@@ -9,19 +17,75 @@ local function clean(value, maxLength)
     return text:sub(1, maxLength or 1000)
 end
 
+local function isWebhookUrl(url)
+    return type(url) == 'string'
+        and (url:match('^https://discord%.com/api/webhooks/')
+            or url:match('^https://discordapp%.com/api/webhooks/'))
+end
+
+local function getCategory(transactionType)
+    if transactionType == 'deposit' then return 'deposits' end
+    if transactionType == 'withdraw' then return 'withdrawals' end
+    if transactionType == 'transfer_out' or transactionType == 'transfer_in' then
+        return 'transfers'
+    end
+    if transactionType == 'transfer_fee' then return 'fees' end
+    return 'other'
+end
+
+local function getWebhookTargets(data)
+    local targets = {}
+    local seen = {}
+
+    local function addConvar(name)
+        local url = GetConvar(name, '')
+        if url == '' then return end
+
+        if not isWebhookUrl(url) then
+            print(('[bc-banking] Ignoring invalid Discord webhook URL in convar %s.'):format(name))
+            return
+        end
+
+        if not seen[url] then
+            seen[url] = true
+            targets[#targets + 1] = url
+        end
+    end
+
+    -- The general webhook receives every event when configured.
+    addConvar('bc_banking_webhook')
+
+    -- A category webhook receives only its matching event type.
+    addConvar('bc_banking_webhook_' .. getCategory(data.type or data.transactionType))
+
+    return targets
+end
+
+local function sendToWebhook(webhook, payload)
+    PerformHttpRequest(webhook, function(statusCode, responseBody)
+        if statusCode < 200 or statusCode >= 300 then
+            print(('[bc-banking] Discord webhook returned HTTP %s: %s'):format(
+                tostring(statusCode),
+                clean(responseBody, 300)
+            ))
+        end
+    end, 'POST', json.encode(payload), {
+        ['Content-Type'] = 'application/json'
+    })
+end
+
 function BCBanking.SendDiscordLog(data)
     if not Config.DiscordLogs then return false end
+    if type(data) ~= 'table' then return false end
 
-    local webhook = GetConvar('bc_banking_webhook', '')
-    if webhook == '' then
+    local targets = getWebhookTargets(data)
+    if #targets == 0 then
         if not BCBanking._discordWebhookWarning then
-            print('^3[bc-banking] Discord logs are enabled but bc_banking_webhook is not configured in server.cfg.^7')
+            print('^3[bc-banking] Discord logs are enabled but no valid webhook is configured. Set bc_banking_webhook or a category-specific webhook in server.cfg.^7')
             BCBanking._discordWebhookWarning = true
         end
         return false
     end
-
-    if type(data) ~= 'table' then return false end
 
     local fields = {}
     for _, field in ipairs(data.fields or {}) do
@@ -43,16 +107,9 @@ function BCBanking.SendDiscordLog(data)
         }}
     }
 
-    PerformHttpRequest(webhook, function(statusCode, responseBody)
-        if statusCode < 200 or statusCode >= 300 then
-            print(('[bc-banking] Discord webhook returned HTTP %s: %s'):format(
-                tostring(statusCode),
-                clean(responseBody, 300)
-            ))
-        end
-    end, 'POST', json.encode(payload), {
-        ['Content-Type'] = 'application/json'
-    })
+    for _, webhook in ipairs(targets) do
+        sendToWebhook(webhook, payload)
+    end
 
     return true
 end
