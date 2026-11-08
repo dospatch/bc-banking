@@ -173,6 +173,75 @@ function BCBanking.V2.ApplyDelta(accountId, citizenid, delta, entryType, descrip
     return true, entry.id
 end
 
+function BCBanking.V2.Transfer(fromAccountId, toAccountId, actorCitizenid, amount, description)
+    fromAccountId, toAccountId = tonumber(fromAccountId), tonumber(toAccountId)
+    amount = tonumber(amount)
+    if not fromAccountId or not toAccountId or fromAccountId == toAccountId
+        or not amount or amount <= 0 or amount ~= amount then
+        return false, 'Invalid transfer.'
+    end
+    if not BCBanking.V2.Ready then return false, 'V2 database is not ready.' end
+    amount = math.floor(amount * 100 + 0.5) / 100
+    local transactionRef = uuid()
+    local ok, result = pcall(function()
+        return MySQL.transaction.await({
+            {
+                query = [[
+                    UPDATE bc_banking_v2_accounts
+                    SET balance = balance - ?
+                    WHERE id = ? AND status = 'active' AND balance >= ?
+                ]],
+                values = { amount, fromAccountId, amount }
+            },
+            { query = 'SET @bc_v2_transfer_debit = ROW_COUNT()', values = {} },
+            {
+                query = [[
+                    UPDATE bc_banking_v2_accounts
+                    SET balance = balance + ?
+                    WHERE id = ? AND status = 'active' AND @bc_v2_transfer_debit = 1
+                ]],
+                values = { amount, toAccountId }
+            },
+            { query = 'SET @bc_v2_transfer_credit = ROW_COUNT()', values = {} },
+            {
+                query = [[
+                    UPDATE bc_banking_v2_accounts
+                    SET balance = balance + ?
+                    WHERE id = ? AND @bc_v2_transfer_debit = 1 AND @bc_v2_transfer_credit = 0
+                ]],
+                values = { amount, fromAccountId }
+            },
+            {
+                query = [[
+                    INSERT INTO bc_banking_v2_ledger
+                        (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description)
+                    SELECT id, ?, 'transfer_out', ?, balance, ?, ?
+                    FROM bc_banking_v2_accounts
+                    WHERE id = ? AND @bc_v2_transfer_credit = 1
+                ]],
+                values = { transactionRef, -amount, actorCitizenid, description or 'Account transfer sent', fromAccountId }
+            },
+            {
+                query = [[
+                    INSERT INTO bc_banking_v2_ledger
+                        (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description)
+                    SELECT id, ?, 'transfer_in', ?, balance, ?, ?
+                    FROM bc_banking_v2_accounts
+                    WHERE id = ? AND @bc_v2_transfer_credit = 1
+                ]],
+                values = { transactionRef, amount, actorCitizenid, description or 'Account transfer received', toAccountId }
+            }
+        })
+    end)
+    if not ok or result ~= true then return false, 'Transfer transaction failed.' end
+    local rows = MySQL.scalar.await(
+        'SELECT COUNT(*) FROM bc_banking_v2_ledger WHERE transaction_ref = ?',
+        { transactionRef }
+    )
+    if tonumber(rows) ~= 2 then return false, 'Insufficient funds or destination account unavailable.' end
+    return true, transactionRef
+end
+
 QBCore.Functions.CreateCallback('bc-banking:v2:getAccounts', function(source, cb)
     local _, citizenid = getCitizen(source)
     if not citizenid or not BCBanking.V2.Ready then cb({}); return end
@@ -271,6 +340,28 @@ local function moveQBCoreMoney(src, data, direction)
     TriggerClientEvent('bc-banking:client:notify', src, direction == 'deposit' and 'Deposit completed.' or 'Withdrawal completed.', 'success')
     TriggerClientEvent('bc-banking:client:v2:refresh', src)
 end
+
+RegisterNetEvent('bc-banking:v2:transfer', function(data)
+    local src = source
+    local Player = QBCore.Functions.GetPlayer(src)
+    if not Player or type(data) ~= 'table' or not BCBanking.V2.Ready then return end
+    local cid = Player.PlayerData.citizenid
+    if not BCBanking.CheckCooldown(cid) then return end
+    local fromId, toId = tonumber(data.fromAccountId), tonumber(data.toAccountId)
+    local transferAmount = validAmount(data.amount, tonumber(Config.V2.MaxPayment) or 1000000)
+    if not fromId or not toId or not transferAmount
+        or not BCBanking.V2.CanAccessAccount(fromId, cid, 'withdraw')
+        or not BCBanking.V2.CanAccessAccount(toId, cid, 'deposit') then
+        TriggerClientEvent('bc-banking:client:notify', src, 'Invalid transfer or account permissions.', 'error')
+        return
+    end
+    local ok, result = BCBanking.V2.Transfer(fromId, toId, cid, transferAmount, BCBanking.Trim(data.description):sub(1, 255))
+    if ok then
+        BCBanking.V2.Audit(cid, 'account.transfer', 'account', fromId, { to_account = toId, amount = transferAmount })
+    end
+    TriggerClientEvent('bc-banking:client:notify', src, ok and 'Transfer completed.' or (result or 'Transfer failed.'), ok and 'success' or 'error')
+    TriggerClientEvent('bc-banking:client:v2:refresh', src)
+end)
 
 RegisterNetEvent('bc-banking:v2:fundAccount', function(data)
     moveQBCoreMoney(source, data, 'deposit')
