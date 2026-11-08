@@ -23,6 +23,9 @@ Config.TransactionCooldown = 1000
 
 Config.TransactionHistoryLimit = 50
 
+-- Discord logs are sent server-side. Keep the webhook URL in server.cfg, never here.
+Config.DiscordLogs = true
+
 Config.BankLocations = {
     vector3(149.55, -1040.7, 29.37),
     vector3(-1212.98, -330.84, 37.78),
