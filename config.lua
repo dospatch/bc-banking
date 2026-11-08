@@ -26,8 +26,9 @@ Config.TransactionHistoryLimit = 50
 -- Discord transaction logs. Set to false to disable all Discord logging.
 Config.DiscordLogs = true
 
--- Webhook destinations are loaded from config.private.lua (local only, never commit it).
--- Copy config.private.example.lua to config.private.lua and add your own Discord webhook URLs.
+-- Paste your own Discord webhook URLs below.
+-- Leave a destination blank to disable that log destination.
+-- IMPORTANT: Do not commit real webhook URLs to the public GitHub repository.
 Config.DiscordWebhooks = {
     general = '',
     deposits = '',
