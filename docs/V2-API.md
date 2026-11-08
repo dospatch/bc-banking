@@ -79,4 +79,5 @@ The command registration and the explicit `bc-banking.admin` check both apply to
 - Never expose server exports as client events without a server-side authorization wrapper.
 - Treat `false` as a failed payment and do not deliver the purchased item/vehicle.
 - Do not use a V2 ledger balance as a mirror of QBCore bank money; they are separate balances.
-- Use an idempotency key in the calling resource's purchase workflow until built-in idempotency enforcement is enabled for every money-moving export.
+- Every money-moving V2 export requires a unique idempotency key. Reuse the same key only when retrying the same logical operation; use a new key for a new payment.
+- A repeated completed request returns success without moving money again. Failed operations that were safely reversed can be retried with the same key; a request with changed parameters is rejected as an idempotency conflict.
