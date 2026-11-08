@@ -98,22 +98,51 @@ RegisterNetEvent('bc-banking:v2:transfer', function(data)
     if not fromId or not value or #toNumber < 6 or #toNumber > 24 then return end
     local from = member(fromId, cid)
     local to = MySQL.single.await("SELECT * FROM bc_banking_v2_accounts WHERE account_number = ? AND status = 'active' LIMIT 1", { toNumber })
-    if not from or not to or from.permissions == nil then return end
+    if not from or not to then return end
     local permissions = type(from.permissions) == 'table' and from.permissions or json.decode(from.permissions or '{}') or {}
-    if not permissions.transfer then return end
-    if tonumber(from.id) == tonumber(to.id) then return end
+    if not permissions.transfer or tonumber(from.id) == tonumber(to.id) then return end
     local fee = math.max(0, tonumber(Config.V2 and Config.V2.InternalTransferFee) or 0)
     local total = value + fee
     local ref = ('%s-%s-%s'):format(os.time(), src, math.random(100000, 999999))
-    local ok = MySQL.transaction.await({
-        { query = "UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ? AND status = 'active' AND balance >= ?", values = { total, fromId, total } },
-        { query = "UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ? AND status = 'active'", values = { value, to.id } },
-        { query = [[INSERT INTO bc_banking_v2_ledger (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description, metadata)
-                    SELECT id, ?, 'transfer_out', ?, balance, ?, ?, ? FROM bc_banking_v2_accounts WHERE id = ?]], values = { ref, value, cid, tostring(data.description or 'Account transfer'):sub(1, 255), json.encode({ recipient=to.account_number, fee=fee }), fromId } },
-        { query = [[INSERT INTO bc_banking_v2_ledger (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description, metadata)
-                    SELECT id, ?, 'transfer_in', ?, balance, ?, ?, ? FROM bc_banking_v2_accounts WHERE id = ?]], values = { ref, value, cid, tostring(data.description or 'Incoming transfer'):sub(1, 255), json.encode({ sender=from.account_number }), to.id } }
-    })
-    if not ok then TriggerClientEvent('bc-banking:client:notify', src, 'Transfer failed or insufficient funds.', 'error'); return end
+    -- One atomic multi-table update prevents the recipient being credited when
+    -- the source account lacks funds. Both balances are changed by one SQL statement.
+    local changed = MySQL.update.await([[
+        UPDATE bc_banking_v2_accounts AS src
+        JOIN bc_banking_v2_accounts AS dst ON dst.id = ?
+        SET src.balance = src.balance - ?, dst.balance = dst.balance + ?
+        WHERE src.id = ? AND src.status = 'active' AND dst.status = 'active'
+          AND src.balance >= ?
+    ]], { to.id, total, value, fromId, total })
+    if not changed or changed < 2 then
+        TriggerClientEvent('bc-banking:client:notify', src, 'Transfer failed or insufficient funds.', 'error')
+        return
+    end
+    local logged, err = pcall(function()
+        MySQL.insert.await([[
+            INSERT INTO bc_banking_v2_ledger
+            (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description, metadata)
+            SELECT id, ?, 'transfer_out', ?, balance, ?, ?, ?
+            FROM bc_banking_v2_accounts WHERE id = ?
+        ]], { ref, total, cid, tostring(data.description or 'Account transfer'):sub(1, 255), json.encode({ recipient=to.account_number, fee=fee }), fromId })
+        MySQL.insert.await([[
+            INSERT INTO bc_banking_v2_ledger
+            (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description, metadata)
+            SELECT id, ?, 'transfer_in', ?, balance, ?, ?, ?
+            FROM bc_banking_v2_accounts WHERE id = ?
+        ]], { ref, value, cid, tostring(data.description or 'Incoming transfer'):sub(1, 255), json.encode({ sender=from.account_number }), to.id })
+    end)
+    if not logged then
+        -- Compensating reversal if audit ledger persistence fails.
+        MySQL.update.await([[
+            UPDATE bc_banking_v2_accounts AS src
+            JOIN bc_banking_v2_accounts AS dst ON dst.id = ?
+            SET src.balance = src.balance + ?, dst.balance = dst.balance - ?
+            WHERE src.id = ?
+        ]], { to.id, total, value, fromId })
+        print(('[bc-banking] V2 transfer ledger failure; balances reversed: %s'):format(tostring(err)))
+        TriggerClientEvent('bc-banking:client:notify', src, 'Transfer was reversed because it could not be recorded.', 'error')
+        return
+    end
     logAudit(cid, 'account.transfer', fromId, { to=to.account_number, amount=value, fee=fee })
     TriggerClientEvent('bc-banking:client:notify', src, 'Transfer completed.', 'success')
     TriggerClientEvent('bc-banking:client:v2:refresh', src)
@@ -361,13 +390,19 @@ exports('DepositToV2Account', function(accountId, citizenid, value, description)
     if not access then return false, 'not_authorized' end
     local perms = type(access.permissions) == 'table' and access.permissions or json.decode(access.permissions or '{}') or {}
     if not perms.deposit then return false, 'not_authorized' end
-    local ref = ('dep-%s-%s'):format(os.time(), math.random(100000,999999))
-    local ok = MySQL.transaction.await({
-        { query='UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ? AND status = "active"', values={ n, accountId } },
-        { query=[[INSERT INTO bc_banking_v2_ledger (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description)
-                  SELECT id, ?, 'deposit', ?, balance, ?, ? FROM bc_banking_v2_accounts WHERE id = ?]], values={ ref, n, citizenid, tostring(description or 'External deposit'):sub(1,255), accountId } }
-    })
-    return ok == true, ok and nil or 'database_error'
+    local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ? AND status = "active"', { n, accountId })
+    if not changed or changed < 1 then return false, 'database_error' end
+    local ok, err = pcall(function()
+        MySQL.insert.await([[INSERT INTO bc_banking_v2_ledger
+            (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description)
+            SELECT id, ?, 'deposit', ?, balance, ?, ? FROM bc_banking_v2_accounts WHERE id = ?]],
+            { ('dep-%s-%s'):format(os.time(), math.random(100000,999999)), n, citizenid, tostring(description or 'External deposit'):sub(1,255), accountId })
+    end)
+    if not ok then
+        MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ?', { n, accountId })
+        return false, 'ledger_error'
+    end
+    return true
 end)
 
 exports('WithdrawFromV2Account', function(accountId, citizenid, value, description)
@@ -377,13 +412,19 @@ exports('WithdrawFromV2Account', function(accountId, citizenid, value, descripti
     if not access then return false, 'not_authorized' end
     local perms = type(access.permissions) == 'table' and access.permissions or json.decode(access.permissions or '{}') or {}
     if not perms.withdraw then return false, 'not_authorized' end
-    local ref = ('wd-%s-%s'):format(os.time(), math.random(100000,999999))
-    local ok = MySQL.transaction.await({
-        { query='UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ? AND status = "active" AND balance >= ?', values={ n, accountId, n } },
-        { query=[[INSERT INTO bc_banking_v2_ledger (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description)
-                  SELECT id, ?, 'withdrawal', ?, balance, ?, ? FROM bc_banking_v2_accounts WHERE id = ?]], values={ ref, n, citizenid, tostring(description or 'External withdrawal'):sub(1,255), accountId } }
-    })
-    return ok == true, ok and nil or 'insufficient_or_database_error'
+    local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ? AND status = "active" AND balance >= ?', { n, accountId, n })
+    if not changed or changed < 1 then return false, 'insufficient_funds' end
+    local ok, err = pcall(function()
+        MySQL.insert.await([[INSERT INTO bc_banking_v2_ledger
+            (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description)
+            SELECT id, ?, 'withdrawal', ?, balance, ?, ? FROM bc_banking_v2_accounts WHERE id = ?]],
+            { ('wd-%s-%s'):format(os.time(), math.random(100000,999999)), n, citizenid, tostring(description or 'External withdrawal'):sub(1,255), accountId })
+    end)
+    if not ok then
+        MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ?', { n, accountId })
+        return false, 'ledger_error'
+    end
+    return true
 end)
 
 exports('CreateV2Account', function(citizenid, kind, name)
