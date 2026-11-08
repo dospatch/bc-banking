@@ -173,8 +173,8 @@ function listRows(target, rows, renderRow, empty) {
 }
 
 async function refreshV2() {
-    const [accounts, goals, cards, loans, businesses] = await Promise.all([
-        nui('v2Accounts'), nui('v2Goals'), nui('v2Cards'), nui('v2Loans'), nui('v2Businesses')
+    const [accounts, goals, cards, loans, businesses, schedules] = await Promise.all([
+        nui('v2Accounts'), nui('v2Goals'), nui('v2Cards'), nui('v2Loans'), nui('v2Businesses'), nui('v2ScheduledPayments')
     ]);
     const sourceSelect = document.getElementById('v2SourceAccount');
     if (sourceSelect) {
@@ -202,6 +202,8 @@ async function refreshV2() {
     listRows('v2Loans', loans, l =>
         '<strong>Loan #' + escapeHtml(l.id) + '</strong><span>' + escapeHtml(l.status) + ' • ' +
         escapeHtml(l.term_months) + ' months</span><b>' + money(l.principal) + '</b>', 'No loan applications yet.');
+    listRows('v2Schedules', schedules, p =>
+        '<strong>Payment #' + escapeHtml(p.id) + '</strong><span>' + escapeHtml(p.frequency) + ' • ' + escapeHtml(p.status) + ' • ' + escapeHtml(p.next_run_at) + '</span><b>' + money(p.amount) + '</b>', 'No scheduled payments yet.');
     listRows('v2Businesses', businesses, b =>
         '<strong>' + escapeHtml(b.name) + '</strong><span>' + escapeHtml(b.role) + ' • Business #' +
         escapeHtml(b.id) + '</span>', 'No business accounts yet.');
@@ -236,6 +238,22 @@ bindV2('contributeGoalButton', 'contributeGoal', () => ({
 }));
 bindV2('issueCardButton', 'issueCard', () => ({
     accountId: Number(document.getElementById('cardAccountId').value)
+}));
+bindV2('repayLoanButton', 'repayLoan', () => ({
+    loanId: Number(document.getElementById('repayLoanId').value),
+    amount: Number(document.getElementById('repayLoanAmount').value)
+}));
+bindV2('addEmployeeButton', 'addBusinessEmployee', () => {
+    const parts = document.getElementById('employeePermissions').value.split(',').map(x => x.trim());
+    return { businessId: Number(document.getElementById('businessId').value), citizenid: document.getElementById('employeeCitizenId').value.trim(), permissions: Object.fromEntries(['view','deposit','withdraw','transfer','payroll'].map(k => [k, parts.includes(k)])) };
+});
+bindV2('createScheduleButton', 'createScheduledPayment', () => ({
+    sourceAccountId: Number(document.getElementById('scheduleSource').value),
+    destinationAccountId: Number(document.getElementById('scheduleDestination').value),
+    amount: Number(document.getElementById('scheduleAmount').value),
+    nextRunAt: document.getElementById('scheduleDate').value.replace('T', ' ') + ':00',
+    frequency: document.getElementById('scheduleFrequency').value,
+    description: document.getElementById('scheduleDescription').value.trim()
 }));
 bindV2('applyLoanButton', 'applyLoan', () => ({
     amount: Number(document.getElementById('loanAmount').value),
