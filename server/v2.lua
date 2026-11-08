@@ -298,11 +298,19 @@ RegisterNetEvent('bc-banking:v2:addBusinessEmployee', function(data)
     local owner = MySQL.single.await("SELECT id FROM bc_banking_v2_business_members WHERE business_id = ? AND citizenid = ? AND role = 'owner' AND status = 'active'", { businessId, cid })
     if not owner then return end
     local perms = { view=data.permissions and data.permissions.view == true, deposit=data.permissions and data.permissions.deposit == true, withdraw=data.permissions and data.permissions.withdraw == true, transfer=data.permissions and data.permissions.transfer == true, payroll=data.permissions and data.permissions.payroll == true, manage=false }
+    local businessAccount = MySQL.scalar.await('SELECT account_id FROM bc_banking_v2_businesses WHERE id = ?', { businessId })
     MySQL.insert.await([[
         INSERT INTO bc_banking_v2_business_members (business_id, citizenid, role, permissions, status)
         VALUES (?, ?, 'employee', ?, 'active')
         ON DUPLICATE KEY UPDATE permissions = VALUES(permissions), status = 'active'
     ]], { businessId, employeeCid, json.encode(perms) })
+    if businessAccount then
+        MySQL.insert.await([[
+            INSERT INTO bc_banking_v2_account_members (account_id, citizenid, role, permissions, status)
+            VALUES (?, ?, 'employee', ?, 'active')
+            ON DUPLICATE KEY UPDATE permissions = VALUES(permissions), status = 'active'
+        ]], { businessAccount, employeeCid, json.encode(perms) })
+    end
     logAudit(cid, 'business.employee_added', businessId, { employee=employeeCid })
     TriggerClientEvent('bc-banking:client:notify', src, 'Business employee permissions saved.', 'success')
 end)
@@ -326,7 +334,11 @@ RegisterNetEvent('bc-banking:v2:payroll', function(data)
     if not success or success < 1 then TriggerClientEvent('bc-banking:client:notify', src, 'Insufficient business funds.', 'error'); return end
     local recipient = QBCore.Functions.GetPlayerByCitizenId(employeeCid)
     if recipient then
-        recipient.Functions.AddMoney('bank', value, 'bc-banking-business-payroll')
+        local paid = recipient.Functions.AddMoney('bank', value, 'bc-banking-business-payroll')
+        if not paid then
+            MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ?', { value, business.account_id })
+            TriggerClientEvent('bc-banking:client:notify', src, 'Payroll failed; business funds were returned.', 'error'); return
+        end
     else
         local result = MySQL.update.await("UPDATE players SET money = JSON_SET(money, '$.bank', COALESCE(JSON_EXTRACT(money, '$.bank'), 0) + ?) WHERE citizenid = ?", { value, employeeCid })
         if not result or result < 1 then
@@ -666,6 +678,7 @@ local function processScheduledPayments()
 end
 
 CreateThread(function()
+    MySQL.update.await("UPDATE bc_banking_v2_scheduled_payments SET status = 'failed' WHERE status = 'processing'")
     while true do
         Wait(60000)
         local ok, err = pcall(processScheduledPayments)
