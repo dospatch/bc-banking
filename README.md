@@ -198,26 +198,24 @@ Make sure `qb-core`, `oxmysql`, and `ox_target` are started before BC-Banking. `
 
 # 🔔 Discord Transaction Logs
 
-BC-Banking supports multiple Discord webhooks. You can send all transactions to one general channel, or send each category to its own channel.
-
-**Webhook URLs are configured in a local private file, not in the public GitHub repository or server.cfg.**
+BC-Banking supports multiple Discord webhooks. You can send every transaction to one general channel, or send deposits, withdrawals, transfers, fees, and other activity to separate channels.
 
 ## Setup
 
-1. Open the BC-Banking resource folder.
-2. Make a copy of `config.private.example.lua`.
-3. Rename the copy to `config.private.lua`.
-4. Open `config.private.lua` and paste your own Discord webhook URLs into the matching fields.
-5. Keep `config.private.lua` on your server and never upload it to GitHub.
-6. Make sure `Config.DiscordLogs = true` in `config.lua`.
-7. Restart `bc-banking`.
+1. Open `config.lua`.
+2. Find `Config.DiscordWebhooks`.
+3. Paste your own Discord webhook URLs into the destinations you want to use.
+4. Leave unused destinations as empty strings.
+5. Keep `Config.DiscordLogs = true`.
+6. Restart `bc-banking`.
 
-Example private file:
+Example:
 
 ```lua
+Config.DiscordLogs = true
+
 Config.DiscordWebhooks = {
     general = '',
-
     deposits = '',
     withdrawals = '',
     transfers = '',
@@ -235,11 +233,9 @@ Config.DiscordWebhooks = {
 | `fees` | Transfer fees |
 | `other` | Other transaction types |
 
-You do not need to fill in every field. If both `general` and a category webhook are configured, matching transactions go to both channels. If only a category webhook is configured, only that category goes to its channel. Duplicate URLs are sent only once per event.
+You do not need to fill in every field. If both the general webhook and a category webhook are configured, matching transactions go to both channels. If only a category webhook is configured, only that category goes to its channel. Duplicate URLs are sent only once per event.
 
-Each server owner can change these URLs to their own Discord webhooks. The public `config.lua` contains the editable settings, while the real webhook secrets stay in the local `config.private.lua` file. The repository's `.gitignore` excludes that private file from Git commits.
-
-Set `Config.DiscordLogs = false` in `config.lua` to disable Discord logging.
+Each server owner can customize these values in their own installed copy of `config.lua`. **Never commit real webhook URLs to the public GitHub repository**; the public template must keep these values blank. Set `Config.DiscordLogs = false` to disable all Discord transaction logs.
 
 Logs include the character name when online, citizen ID, amount, transaction description, related account, and transaction ID.
 
