@@ -209,6 +209,9 @@ RegisterNetEvent('bc-banking:v2:contributeGoal', function(data)
     if not goalId or not value then return end
     local goal = MySQL.single.await("SELECT * FROM bc_banking_v2_savings_goals WHERE id = ? AND citizenid = ? AND status = 'active'", { goalId, cid })
     if not goal then return end
+    local idempotencyKey, idemState = claimIdempotency(cid, 'savings.contribution', data)
+    if idemState == 'already_completed' then return end
+    if not idempotencyKey then return end
     local player = playerFor(src)
     if not player or (tonumber(player.PlayerData.money.bank) or 0) < value then
         TriggerClientEvent('bc-banking:client:notify', src, 'Insufficient checking balance.', 'error'); return
@@ -220,6 +223,7 @@ RegisterNetEvent('bc-banking:v2:contributeGoal', function(data)
         player.Functions.AddMoney('bank', value, 'bc-banking-savings-goal-refund')
         return
     end
+    completeIdempotency(idempotencyKey, { success=true })
     logAudit(cid, 'savings_goal.contribution', goalId, { amount=value })
     TriggerClientEvent('bc-banking:client:notify', src, 'Savings goal updated.', 'success')
     TriggerClientEvent('bc-banking:client:v2:refresh', src)
@@ -365,6 +369,9 @@ RegisterNetEvent('bc-banking:v2:payroll', function(data)
     if not business then return end
     local perms = type(business.permissions) == 'table' and business.permissions or json.decode(business.permissions or '{}') or {}
     if not perms.payroll then return end
+    local idempotencyKey, idemState = claimIdempotency(cid, 'business.payroll', data)
+    if idemState == 'already_completed' then return end
+    if not idempotencyKey then return end
     local ref = ('pay-%s-%s-%s'):format(os.time(), src, math.random(100000,999999))
     local success = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ? AND balance >= ?', { value, business.account_id, value })
     if not success or success < 1 then TriggerClientEvent('bc-banking:client:notify', src, 'Insufficient business funds.', 'error'); return end
@@ -388,6 +395,7 @@ RegisterNetEvent('bc-banking:v2:payroll', function(data)
         VALUES (?, ?, 'payroll', ?, ?, ?, 'Business payroll payment', ?)
     ]], { business.account_id, ref, value, balance, cid, json.encode({ employee=employeeCid }) })
     MySQL.insert.await('INSERT INTO bc_banking_v2_payroll (business_id, employee_citizenid, amount, actor_citizenid, status) VALUES (?, ?, ?, ?, "paid")', { businessId, employeeCid, value, cid })
+    completeIdempotency(idempotencyKey, { success=true })
     logAudit(cid, 'business.payroll_paid', businessId, { employee=employeeCid, amount=value })
     TriggerClientEvent('bc-banking:client:notify', src, 'Payroll payment sent.', 'success')
 end)
@@ -538,6 +546,9 @@ RegisterNetEvent('bc-banking:v2:repayLoan', function(data)
     if not cid or not id or not value then return end
     local loan = MySQL.single.await("SELECT * FROM bc_banking_v2_loans WHERE id = ? AND citizenid = ? AND status = 'active'", { id, cid })
     if not loan then return end
+    local idempotencyKey, idemState = claimIdempotency(cid, 'loan.repayment', data)
+    if idemState == 'already_completed' then return end
+    if not idempotencyKey then return end
     local due = tonumber(loan.balance_due) or 0
     if value > due then value = due end
     local player = playerFor(src)
@@ -551,6 +562,7 @@ RegisterNetEvent('bc-banking:v2:repayLoan', function(data)
         player.Functions.AddMoney('bank', value, 'bc-banking-loan-repayment-refund')
         return
     end
+    completeIdempotency(idempotencyKey, { success=true })
     logAudit(cid, 'loan.repayment', id, { amount=value, remaining=remaining })
     TriggerClientEvent('bc-banking:client:notify', src, 'Loan repayment received.', 'success')
     TriggerClientEvent('bc-banking:client:v2:refresh', src)
@@ -626,7 +638,7 @@ exports('ChargePlayer', function(source, value, paymentSource, reason, idempoten
     return true
 end)
 
-exports('RecordBusinessExpense', function(businessId, actorCitizenid, value, category, description)
+exports('RecordBusinessExpense', function(businessId, actorCitizenid, value, category, description, idempotencyKey)
     local n = amount(value, tonumber(Config.V2 and Config.V2.MaxPayrollPayment) or 100000)
     if not n then return false, 'invalid_amount' end
     local business = MySQL.single.await([[
@@ -635,6 +647,9 @@ exports('RecordBusinessExpense', function(businessId, actorCitizenid, value, cat
         WHERE b.id = ? AND m.citizenid = ? AND m.status = 'active' AND b.status = 'active'
     ]], { businessId, actorCitizenid })
     if not business then return false, 'not_authorized' end
+    local idem, idemState = claimIdempotency(actorCitizenid, 'business.expense', { idempotencyKey=idempotencyKey, businessId=businessId, amount=n, category=category, description=description })
+    if idemState == 'already_completed' then return true end
+    if not idem then return false, idemState end
     local perms = type(business.permissions) == 'table' and business.permissions or json.decode(business.permissions or '{}') or {}
     if not perms.withdraw then return false, 'not_authorized' end
     local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ? AND balance >= ? AND status = "active"', { n, business.account_id, n })
@@ -650,6 +665,7 @@ exports('RecordBusinessExpense', function(businessId, actorCitizenid, value, cat
         MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ?', { n, business.account_id })
         return false, 'recording_failed'
     end
+    completeIdempotency(idem, { success=true })
     return true
 end)
 
@@ -1000,6 +1016,9 @@ RegisterNetEvent('bc-banking:v2:repayBusinessLoan', function(data)
         LIMIT 1
     ]], { loanId, cid })
     if not loan then return end
+    local idempotencyKey, idemState = claimIdempotency(cid, 'business_loan.repayment', data)
+    if idemState == 'already_completed' then return end
+    if not idempotencyKey then return end
     local due = tonumber(loan.balance_due) or 0
     if value > due then value = due end
     local debited = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ? AND balance >= ? AND status = "active"', { value, loan.account_id, value })
@@ -1017,6 +1036,7 @@ RegisterNetEvent('bc-banking:v2:repayBusinessLoan', function(data)
         INSERT INTO bc_banking_v2_ledger (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description, metadata)
         VALUES (?, ?, 'loan_repayment', ?, ?, ?, 'Business loan repayment', ?)
     ]], { loan.account_id, ('bizloan-%s-%s'):format(loanId, os.time()), value, balance, cid, json.encode({ loan_id=loanId }) })
+    completeIdempotency(idempotencyKey, { success=true })
     logAudit(cid, 'business_loan.repayment', loanId, { amount=value, remaining=remaining })
     TriggerClientEvent('bc-banking:client:notify', src, 'Business loan repayment received.', 'success')
     TriggerClientEvent('bc-banking:client:v2:refresh', src)
