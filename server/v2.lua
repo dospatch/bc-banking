@@ -371,17 +371,22 @@ RegisterNetEvent('bc-banking:v2:applyLoan', function(data)
     local principal = amount(data.amount, tonumber(Config.V2 and Config.V2.MaxLoan) or 500000)
     local months = math.floor(tonumber(data.months) or 0)
     if not principal or months < 1 or months > (tonumber(Config.V2 and Config.V2.MaxLoanMonths) or 24) then return end
-    local open = tonumber(MySQL.scalar.await("SELECT COUNT(*) FROM bc_banking_v2_loans WHERE citizenid = ? AND status IN ('pending','approved','active')", { cid }) or 0)
-    if open > 0 then TriggerClientEvent('bc-banking:client:notify', src, 'You already have an open loan application or loan.', 'error'); return end
     local rate = math.max(0, tonumber(Config.V2 and Config.V2.LoanAPR) or 5)
-    local id = MySQL.insert.await([[
-        INSERT INTO bc_banking_v2_loans (citizenid, principal, apr, term_months, status)
-        VALUES (?, ?, ?, ?, 'pending')
-    ]], { cid, principal, rate, months })
-    if id then
-        logAudit(cid, 'loan.applied', id, { principal=principal, months=months, apr=rate })
-        TriggerClientEvent('bc-banking:client:notify', src, 'Loan application submitted for review.', 'success')
+    local id, err = BCBanking.WithPlayerLocks({ cid }, function()
+        local open = tonumber(MySQL.scalar.await("SELECT COUNT(*) FROM bc_banking_v2_loans WHERE citizenid = ? AND status IN ('pending','approved','active','processing')", { cid }) or 0)
+        if open > 0 then return nil, 'You already have an open loan application or loan.' end
+        return MySQL.insert.await([[
+            INSERT INTO bc_banking_v2_loans (citizenid, principal, apr, term_months, status)
+            VALUES (?, ?, ?, ?, 'pending')
+        ]], { cid, principal, rate, months })
+    end)
+    if not id then
+        TriggerClientEvent('bc-banking:client:notify', src, err or 'Loan application could not be submitted.', 'error')
+        return
     end
+    logAudit(cid, 'loan.applied', id, { principal=principal, months=months, apr=rate })
+    TriggerClientEvent('bc-banking:client:notify', src, 'Loan application submitted for review.', 'success')
+    TriggerClientEvent('bc-banking:client:v2:refresh', src)
 end)
 
 QBCore.Functions.CreateCallback('bc-banking:v2:getLoans', function(src, cb)
