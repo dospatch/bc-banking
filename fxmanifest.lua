@@ -34,7 +34,6 @@ server_scripts {
     'server/v2.lua',
     'server/locks.lua',
     'server/accounts.lua',
-    'server/v2_accounts.lua',
     'server/transactions.lua',
     'server/players.lua',
     'server/transfers.lua',
