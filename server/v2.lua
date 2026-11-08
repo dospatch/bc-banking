@@ -703,7 +703,7 @@ RegisterNetEvent('bc-banking:v2:setCardPin', function(data)
     local card = MySQL.single.await("SELECT id FROM bc_banking_v2_cards WHERE id = ? AND citizenid = ? AND status = 'active'", { cardId, cid })
     if not card then return end
     local salt = tostring(math.random(100000,999999)) .. tostring(os.time()) .. tostring(math.random(100000,999999))
-    local changed = MySQL.update.await([[
+    local changed = MySQL.query.await([[
         INSERT INTO bc_banking_v2_card_secrets (card_id, pin_salt, pin_hash, pin_attempts, pin_locked_until)
         VALUES (?, ?, SHA2(CONCAT(?, ?, ?), 256), 0, NULL)
         ON DUPLICATE KEY UPDATE pin_salt = VALUES(pin_salt), pin_hash = VALUES(pin_hash),
