@@ -1,21 +1,5 @@
 -- Discord webhook logging for BC-Banking.
--- Real webhook URLs belong in config.private.lua, which is ignored by Git.
--- Copy config.private.example.lua to config.private.lua and edit the URLs there.
-
-Config.DiscordWebhooks = Config.DiscordWebhooks or {}
-
-local privateConfig = LoadResourceFile(GetCurrentResourceName(), 'config.private.lua')
-if privateConfig and privateConfig ~= '' then
-    local chunk, loadError = load(privateConfig, '@bc-banking/config.private.lua', 't')
-    if chunk then
-        local ok, runError = pcall(chunk)
-        if not ok then
-            print(('[bc-banking] Could not load config.private.lua: %s'):format(tostring(runError)))
-        end
-    else
-        print(('[bc-banking] Could not parse config.private.lua: %s'):format(tostring(loadError)))
-    end
-end
+-- Webhook destinations are configured directly in config.lua.
 
 local function clean(value, maxLength)
     local text = tostring(value or 'N/A')
@@ -46,14 +30,6 @@ local function getWebhookTargets(data)
 
     local function addWebhook(name)
         local url = webhooks[name]
-
-        -- Backward compatibility: use the old server.cfg convars when the
-        -- matching private config.lua value has not been filled in.
-        if url == nil or url == '' then
-            local convarName = name == 'general' and 'bc_banking_webhook' or ('bc_banking_webhook_' .. name)
-            url = GetConvar(convarName, '')
-        end
-
         if url == nil or url == '' then return end
 
         if not isWebhookUrl(url) then
@@ -94,7 +70,7 @@ function BCBanking.SendDiscordLog(data)
     local targets = getWebhookTargets(data)
     if #targets == 0 then
         if not BCBanking._discordWebhookWarning then
-            print('^3[bc-banking] Discord logs are enabled but no valid webhook is configured. Copy config.private.example.lua to config.private.lua and add a valid webhook URL.^7')
+            print('^3[bc-banking] Discord logs are enabled but no valid webhook is configured. Add a valid webhook URL to Config.DiscordWebhooks in config.lua.^7')
             BCBanking._discordWebhookWarning = true
         end
         return false
