@@ -78,7 +78,7 @@ RegisterNetEvent('bc-banking:v2:createAccount', function(data)
     local allowed = { checking=true, savings=true }
     if not allowed[kind] then TriggerClientEvent('bc-banking:client:notify', src, 'Invalid account type.', 'error'); return end
     local count = tonumber(MySQL.scalar.await([[
-        SELECT COUNT(*) FROM bc_banking_v2_account_members WHERE citizenid = ? AND status = 'active'
+        SELECT COUNT(*) FROM bc_banking_v2_account_members m JOIN bc_banking_v2_accounts a ON a.id = m.account_id WHERE m.citizenid = ? AND m.status = 'active' AND a.account_type IN ('checking','savings')
     ]], { cid }) or 0)
     local cap = tonumber(Config.V2 and Config.V2.MaxPersonalAccounts) or 5
     if count >= cap then TriggerClientEvent('bc-banking:client:notify', src, 'You have reached your account limit.', 'error'); return end
@@ -744,4 +744,84 @@ exports('VerifyCardPin', function(cardId, citizenid, pin)
         WHERE card_id = ?
     ]], { cardId })
     return false
+end)
+
+
+QBCore.Functions.CreateCallback('bc-banking:v2:getLedger', function(src, cb, accountId)
+    local cid = cidFor(src)
+    if not cid or not tonumber(accountId) then cb({}); return end
+    cb(exports['bc-banking']:GetV2Ledger(tonumber(accountId), cid, 50))
+end)
+
+RegisterNetEvent('bc-banking:v2:fundAccount', function(data)
+    local src, cid = source, cidFor(source)
+    if not cid or type(data) ~= 'table' then return end
+    local accountId, value = tonumber(data.accountId), amount(data.amount, tonumber(Config.MaxDeposit) or 1000000)
+    local sourceType = data.source == 'cash' and 'cash' or (data.source == 'bank' and 'bank' or nil)
+    if not accountId or not value or not sourceType then return end
+    local access = member(accountId, cid)
+    if not access then return end
+    local perms = type(access.permissions) == 'table' and access.permissions or json.decode(access.permissions or '{}') or {}
+    if not perms.deposit then return end
+    local player = playerFor(src)
+    if not player then return end
+    local ok, message = BCBanking.WithPlayerLocks({ cid }, function()
+        if (tonumber(player.PlayerData.money[sourceType]) or 0) < value then return false, 'Insufficient funds.' end
+        if not player.Functions.RemoveMoney(sourceType, value, 'bc-banking-v2-account-deposit') then return false, 'Money could not be removed.' end
+        local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ? AND status = "active"', { value, accountId })
+        if not changed or changed < 1 then
+            player.Functions.AddMoney(sourceType, value, 'bc-banking-v2-account-deposit-refund')
+            return false, 'Deposit failed and was reversed.'
+        end
+        local logged = pcall(function()
+            MySQL.insert.await([[
+                INSERT INTO bc_banking_v2_ledger (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description)
+                SELECT id, ?, 'deposit', ?, balance, ?, ? FROM bc_banking_v2_accounts WHERE id = ?
+            ]], { ('fund-%s-%s'):format(os.time(), math.random(100000,999999)), value, cid, 'Deposit from ' .. sourceType, accountId })
+        end)
+        if not logged then
+            MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ?', { value, accountId })
+            player.Functions.AddMoney(sourceType, value, 'bc-banking-v2-account-deposit-refund')
+            return false, 'Deposit could not be recorded and was reversed.'
+        end
+        return true, 'Account funded.'
+    end)
+    TriggerClientEvent('bc-banking:client:notify', src, message or (ok and 'Account funded.' or 'Deposit failed.'), ok and 'success' or 'error')
+    TriggerClientEvent('bc-banking:client:v2:refresh', src)
+end)
+
+RegisterNetEvent('bc-banking:v2:withdrawAccount', function(data)
+    local src, cid = source, cidFor(source)
+    if not cid or type(data) ~= 'table' then return end
+    local accountId, value = tonumber(data.accountId), amount(data.amount, tonumber(Config.MaxWithdrawal) or 1000000)
+    local destination = data.destination == 'cash' and 'cash' or (data.destination == 'bank' and 'bank' or nil)
+    if not accountId or not value or not destination then return end
+    local access = member(accountId, cid)
+    if not access then return end
+    local perms = type(access.permissions) == 'table' and access.permissions or json.decode(access.permissions or '{}') or {}
+    if not perms.withdraw then return end
+    local player = playerFor(src)
+    if not player then return end
+    local ok, message = BCBanking.WithPlayerLocks({ cid }, function()
+        local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ? AND status = "active" AND balance >= ?', { value, accountId, value })
+        if not changed or changed < 1 then return false, 'Insufficient account funds.' end
+        if not player.Functions.AddMoney(destination, value, 'bc-banking-v2-account-withdrawal') then
+            MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ?', { value, accountId })
+            return false, 'Withdrawal failed and was reversed.'
+        end
+        local logged = pcall(function()
+            MySQL.insert.await([[
+                INSERT INTO bc_banking_v2_ledger (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description)
+                SELECT id, ?, 'withdrawal', ?, balance, ?, ? FROM bc_banking_v2_accounts WHERE id = ?
+            ]], { ('cashout-%s-%s'):format(os.time(), math.random(100000,999999)), value, cid, 'Withdrawal to ' .. destination, accountId })
+        end)
+        if not logged then
+            player.Functions.RemoveMoney(destination, value, 'bc-banking-v2-account-withdrawal-reversal')
+            MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ?', { value, accountId })
+            return false, 'Withdrawal could not be recorded and was reversed.'
+        end
+        return true, 'Withdrawal completed.'
+    end)
+    TriggerClientEvent('bc-banking:client:notify', src, message or (ok and 'Withdrawal completed.' or 'Withdrawal failed.'), ok and 'success' or 'error')
+    TriggerClientEvent('bc-banking:client:v2:refresh', src)
 end)
