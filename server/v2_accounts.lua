@@ -72,8 +72,11 @@ function BCBanking.V2.CreateAccount(citizenid, accountType, displayName)
     end
     local maximum = math.max(1, tonumber(Config.V2 and Config.V2.MaxPersonalAccounts) or 5)
     local count = tonumber(MySQL.scalar.await([[
-        SELECT COUNT(*) FROM bc_banking_v2_account_members
-        WHERE citizenid = ? AND status = 'active'
+        SELECT COUNT(*)
+        FROM bc_banking_v2_account_members m
+        INNER JOIN bc_banking_v2_accounts a ON a.id = m.account_id
+        WHERE m.citizenid = ? AND m.status = 'active' AND a.status = 'active'
+          AND a.account_type IN ('checking', 'savings')
     ]], { citizenid })) or 0
     if count >= maximum then return false, 'You have reached your personal account limit.' end
 
@@ -123,11 +126,16 @@ function BCBanking.V2.Audit(actor, action, targetType, targetId, details)
 end
 
 function BCBanking.V2.ApplyDelta(accountId, citizenid, delta, entryType, description)
+    if not BCBanking.V2.Ready then return false, 'V2 database is not ready.' end
     delta = tonumber(delta)
     if not delta or delta ~= delta or delta == math.huge or delta == -math.huge or delta == 0 then
         return false, 'Invalid ledger amount.'
     end
-    delta = math.floor(delta * 100 + (delta >= 0 and 0.5 or -0.5)) / 100
+    if delta >= 0 then
+        delta = math.floor(delta * 100 + 0.5) / 100
+    else
+        delta = math.ceil(delta * 100 - 0.5) / 100
+    end
     local transactionRef = uuid()
 
     local ok, err = pcall(function()
@@ -167,14 +175,14 @@ end
 
 QBCore.Functions.CreateCallback('bc-banking:v2:getAccounts', function(source, cb)
     local _, citizenid = getCitizen(source)
-    if not citizenid then cb({}); return end
+    if not citizenid or not BCBanking.V2.Ready then cb({}); return end
     cb(BCBanking.V2.GetAccounts(citizenid))
 end)
 
 QBCore.Functions.CreateCallback('bc-banking:v2:getLedger', function(source, cb, accountId)
     local _, citizenid = getCitizen(source)
     accountId = tonumber(accountId)
-    if not citizenid or not accountId or not BCBanking.V2.CanAccessAccount(accountId, citizenid, 'view_transactions') then
+    if not BCBanking.V2.Ready or not citizenid or not accountId or not BCBanking.V2.CanAccessAccount(accountId, citizenid, 'view_transactions') then
         cb({})
         return
     end
@@ -190,6 +198,10 @@ RegisterNetEvent('bc-banking:v2:createAccount', function(data)
     local src = source
     local _, citizenid = getCitizen(src)
     if not citizenid or type(data) ~= 'table' then return end
+    if not BCBanking.V2.Ready then
+        TriggerClientEvent('bc-banking:client:notify', src, 'V2 banking is not ready. Contact staff.', 'error')
+        return
+    end
     if not BCBanking.CheckCooldown(citizenid) then return end
     local result, message = BCBanking.V2.CreateAccount(citizenid, tostring(data.accountType or ''), data.displayName)
     TriggerClientEvent('bc-banking:client:notify', src,
@@ -201,6 +213,10 @@ end)
 local function moveQBCoreMoney(src, data, direction)
     local Player, citizenid = getCitizen(src)
     if not Player or type(data) ~= 'table' then return end
+    if not BCBanking.V2.Ready then
+        TriggerClientEvent('bc-banking:client:notify', src, 'V2 banking is not ready. Contact staff.', 'error')
+        return
+    end
     if not BCBanking.CheckCooldown(citizenid) then return end
 
     local accountId = tonumber(data.accountId)
