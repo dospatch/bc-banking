@@ -74,20 +74,52 @@ local function logAudit(actor, action, target, details)
 end
 local function createAccount(citizenid, kind, name, initial)
     if not BCBanking.V2Ready then return nil, 'V2 database is not ready.' end
-    local number = accountNumber()
-    if not number then return nil, 'Could not allocate an account number.' end
-    local id = MySQL.insert.await([[
-        INSERT INTO bc_banking_v2_accounts
-        (account_number, account_type, display_name, owner_citizenid, balance, status)
-        VALUES (?, ?, ?, ?, ?, 'active')
-    ]], { number, kind, name, initial or 0 })
-    if not id then return nil, 'Account creation failed.' end
-    MySQL.insert.await([[
-        INSERT INTO bc_banking_v2_account_members
-        (account_id, citizenid, role, permissions, status)
-        VALUES (?, ?, 'owner', ?, 'active')
-    ]], { id, citizenid, json.encode({ view=true, deposit=true, withdraw=true, transfer=true, manage=true, statements=true }) })
-    return MySQL.single.await('SELECT * FROM bc_banking_v2_accounts WHERE id = ?', { id })
+
+    local permissions = json.encode({
+        view=true, deposit=true, withdraw=true, transfer=true,
+        manage=true, statements=true
+    })
+
+    -- Account and owner membership are committed together. A failed second
+    -- insert must never leave an orphaned account with no authorized owner.
+    for attempt = 1, 5 do
+        local number = accountNumber()
+        if not number then return nil, 'Could not allocate an account number.' end
+
+        local transactionOk, committed = pcall(function()
+            return MySQL.transaction.await({
+                {
+                    query = [[
+                        INSERT INTO bc_banking_v2_accounts
+                        (account_number, account_type, display_name, owner_citizenid, balance, status)
+                        VALUES (?, ?, ?, ?, ?, 'active')
+                    ]],
+                    values = { number, kind, name, initial or 0 }
+                },
+                {
+                    query = [[
+                        INSERT INTO bc_banking_v2_account_members
+                        (account_id, citizenid, role, permissions, status)
+                        SELECT id, ?, 'owner', ?, 'active'
+                        FROM bc_banking_v2_accounts
+                        WHERE account_number = ? AND owner_citizenid = ?
+                    ]],
+                    values = { citizenid, permissions, number, citizenid }
+                }
+            })
+        end)
+
+        if transactionOk and committed == true then
+            local account = MySQL.single.await(
+                'SELECT * FROM bc_banking_v2_accounts WHERE account_number = ? LIMIT 1',
+                { number }
+            )
+            if account then return account end
+            return nil, 'Account was committed but could not be loaded.'
+        end
+    end
+
+    return nil, 'Account creation failed after multiple safe attempts.'
 end
 
 QBCore.Functions.CreateCallback('bc-banking:v2:getAccounts', function(src, cb)
