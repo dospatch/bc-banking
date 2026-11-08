@@ -78,10 +78,13 @@ RegisterNUICallback('v2Cards', function(_, cb) v2Callback('getCards', nil, cb) e
 RegisterNUICallback('v2Loans', function(_, cb) v2Callback('getLoans', nil, cb) end)
 RegisterNUICallback('v2Businesses', function(_, cb) v2Callback('getBusinesses', nil, cb) end)
 RegisterNUICallback('v2ScheduledPayments', function(_, cb) v2Callback('getScheduledPayments', nil, cb) end)
+RegisterNUICallback('v2Ledger', function(data, cb) v2Callback('getLedger', data and data.accountId, cb) end)
 
 local v2Events = {
     createV2Account = 'bc-banking:v2:createAccount',
     v2Transfer = 'bc-banking:v2:transfer',
+    fundV2Account = 'bc-banking:v2:fundAccount',
+    withdrawV2Account = 'bc-banking:v2:withdrawAccount',
     createGoal = 'bc-banking:v2:createGoal',
     contributeGoal = 'bc-banking:v2:contributeGoal',
     issueCard = 'bc-banking:v2:issueCard',
