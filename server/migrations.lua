@@ -207,6 +207,24 @@ local statements = {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     ]],
     [[
+        CREATE TABLE IF NOT EXISTS bc_banking_v2_business_loans (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            business_id BIGINT UNSIGNED NOT NULL,
+            applicant_citizenid VARCHAR(50) NOT NULL,
+            principal DECIMAL(15,2) NOT NULL,
+            apr DECIMAL(7,3) NOT NULL DEFAULT 0,
+            term_months INT NOT NULL,
+            monthly_payment DECIMAL(15,2) NOT NULL DEFAULT 0,
+            balance_due DECIMAL(15,2) NOT NULL DEFAULT 0,
+            status VARCHAR(16) NOT NULL DEFAULT 'pending',
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            reviewed_at DATETIME DEFAULT NULL,
+            next_payment_at DATETIME DEFAULT NULL,
+            PRIMARY KEY (id), KEY idx_bc_v2_business_loan (business_id, status),
+            CONSTRAINT fk_bc_v2_business_loan FOREIGN KEY (business_id) REFERENCES bc_banking_v2_businesses(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    ]],
+    [[
         CREATE TABLE IF NOT EXISTS bc_banking_v2_business_expenses (
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
             business_id BIGINT UNSIGNED NOT NULL,
@@ -248,7 +266,7 @@ function Migration.Apply()
             INSERT INTO bc_banking_schema_versions (version, name)
             VALUES (?, ?)
             ON DUPLICATE KEY UPDATE name = VALUES(name)
-        ]], { 3, 'v2_full_banking_schema' })
+        ]], { 4, 'v2_full_banking_schema' })
     end)
 
     if not ok then
