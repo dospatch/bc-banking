@@ -225,3 +225,16 @@ CREATE TABLE IF NOT EXISTS `bc_banking_v2_audit_log` (
     KEY `idx_bc_v2_audit_actor` (`actor_citizenid`, `created_at`),
     KEY `idx_bc_v2_audit_target` (`target_type`, `target_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `bc_banking_v2_interest_runs` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `account_id` BIGINT UNSIGNED NOT NULL,
+    `accrual_date` DATE NOT NULL,
+    `interest_amount` DECIMAL(15,2) NOT NULL,
+    `status` VARCHAR(16) NOT NULL DEFAULT 'processing',
+    `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_bc_v2_interest_account_date` (`account_id`, `accrual_date`),
+    CONSTRAINT `fk_bc_v2_interest_account` FOREIGN KEY (`account_id`)
+        REFERENCES `bc_banking_v2_accounts` (`id`) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
