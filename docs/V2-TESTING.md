@@ -48,6 +48,7 @@
 ## Scheduled payments and administration
 - Test one-time, weekly and monthly payments, due time, source debit and destination credit.
 - Test insufficient funds, invalid membership, cancellation, duplicate runs and resource restart while processing.
+- For each money-moving export, repeat the same idempotency key and verify the balance changes once; retry a safely failed operation with the same key; reuse a key with changed parameters and expect an idempotency conflict.
 - Freeze/close account and verify transactions are blocked; reopen and verify access.
 - Verify audit records and ACE restrictions.
 
