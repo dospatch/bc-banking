@@ -21,7 +21,27 @@ local function claimIdempotency(citizenid, operation, payload)
     if previous and previous.request_hash == requestHash and previous.status == 'completed' then
         return nil, 'already_completed'
     end
+    if previous and previous.request_hash == requestHash and previous.status == 'failed' then
+        local retried = MySQL.update.await([[
+            UPDATE bc_banking_v2_idempotency
+            SET status = 'processing', result_json = NULL, completed_at = NULL, created_at = CURRENT_TIMESTAMP
+            WHERE idempotency_key = ? AND request_hash = ? AND status = 'failed'
+        ]], { scoped, requestHash })
+        if retried and retried > 0 then return scoped, 'claimed' end
+        previous = MySQL.single.await('SELECT request_hash, status FROM bc_banking_v2_idempotency WHERE idempotency_key = ?', { scoped })
+    end
     return nil, previous and previous.request_hash ~= requestHash and 'idempotency_conflict' or 'already_processing'
+end
+
+local function failIdempotency(key, reason)
+    if not key then return end
+    pcall(function()
+        MySQL.update.await([[
+            UPDATE bc_banking_v2_idempotency
+            SET status = 'failed', result_json = ?, completed_at = CURRENT_TIMESTAMP
+            WHERE idempotency_key = ? AND status = 'processing'
+        ]], { json.encode({ success=false, reason=tostring(reason or 'failed'):sub(1,120) }), key })
+    end)
 end
 
 local function completeIdempotency(key, result)
@@ -207,6 +227,7 @@ RegisterNetEvent('bc-banking:v2:transfer', function(data)
           AND src.balance >= ?
     ]], { to.id, total, value, fromId, total })
     if not changed or changed < 2 then
+        failIdempotency(idempotencyKey, 'insufficient_funds_or_account_unavailable')
         TriggerClientEvent('bc-banking:client:notify', src, 'Transfer failed or insufficient funds.', 'error')
         return
     end
@@ -232,6 +253,7 @@ RegisterNetEvent('bc-banking:v2:transfer', function(data)
             SET src.balance = src.balance + ?, dst.balance = dst.balance - ?
             WHERE src.id = ?
         ]], { to.id, total, value, fromId })
+        failIdempotency(idempotencyKey, 'ledger_write_failed')
         print(('[bc-banking] V2 transfer ledger failure; balances reversed: %s'):format(tostring(err)))
         TriggerClientEvent('bc-banking:client:notify', src, 'Transfer was reversed because it could not be recorded.', 'error')
         return
@@ -272,13 +294,15 @@ RegisterNetEvent('bc-banking:v2:contributeGoal', function(data)
     if not idempotencyKey then return end
     local player = playerFor(src)
     if not player or (tonumber(player.PlayerData.money.bank) or 0) < value then
+        failIdempotency(idempotencyKey, 'insufficient_funds')
         TriggerClientEvent('bc-banking:client:notify', src, 'Insufficient checking balance.', 'error'); return
     end
     local removed = player.Functions.RemoveMoney('bank', value, 'bc-banking-savings-goal')
-    if not removed then return end
+    if not removed then failIdempotency(idempotencyKey, 'money_removal_failed'); return end
     local updated = MySQL.update.await("UPDATE bc_banking_v2_savings_goals SET status = IF(current_amount + ? >= target_amount, 'completed', status), current_amount = current_amount + ? WHERE id = ? AND citizenid = ?", { value, value, goalId, cid })
     if not updated then
         player.Functions.AddMoney('bank', value, 'bc-banking-savings-goal-refund')
+        failIdempotency(idempotencyKey, 'goal_update_failed')
         return
     end
     completeIdempotency(idempotencyKey, { success=true })
@@ -433,18 +457,23 @@ RegisterNetEvent('bc-banking:v2:payroll', function(data)
     if not idempotencyKey then return end
     local ref = ('pay-%s-%s-%s'):format(os.time(), src, math.random(100000,999999))
     local success = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ? AND balance >= ?', { value, business.account_id, value })
-    if not success or success < 1 then TriggerClientEvent('bc-banking:client:notify', src, 'Insufficient business funds.', 'error'); return end
+    if not success or success < 1 then
+        failIdempotency(idempotencyKey, 'insufficient_business_funds')
+        TriggerClientEvent('bc-banking:client:notify', src, 'Insufficient business funds.', 'error'); return
+    end
     local recipient = QBCore.Functions.GetPlayerByCitizenId(employeeCid)
     if recipient then
         local paid = recipient.Functions.AddMoney('bank', value, 'bc-banking-business-payroll')
         if not paid then
             MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ?', { value, business.account_id })
+            failIdempotency(idempotencyKey, 'payroll_payout_failed')
             TriggerClientEvent('bc-banking:client:notify', src, 'Payroll failed; business funds were returned.', 'error'); return
         end
     else
         local result = MySQL.update.await("UPDATE players SET money = JSON_SET(money, '$.bank', COALESCE(JSON_EXTRACT(money, '$.bank'), 0) + ?) WHERE citizenid = ?", { value, employeeCid })
         if not result or result < 1 then
             MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ?', { value, business.account_id })
+            failIdempotency(idempotencyKey, 'employee_not_found')
             TriggerClientEvent('bc-banking:client:notify', src, 'Employee not found; payroll reversed.', 'error'); return
         end
     end
@@ -626,13 +655,17 @@ RegisterNetEvent('bc-banking:v2:repayLoan', function(data)
     if value > due then value = due end
     local player = playerFor(src)
     if not player or (tonumber(player.PlayerData.money.bank) or 0) < value then
+        failIdempotency(idempotencyKey, 'insufficient_funds')
         TriggerClientEvent('bc-banking:client:notify', src, 'Insufficient bank funds for repayment.', 'error'); return
     end
-    if not player.Functions.RemoveMoney('bank', value, 'bc-banking-loan-repayment') then return end
+    if not player.Functions.RemoveMoney('bank', value, 'bc-banking-loan-repayment') then
+        failIdempotency(idempotencyKey, 'money_removal_failed'); return
+    end
     local remaining = math.max(0, due - value)
     local changed = MySQL.update.await("UPDATE bc_banking_v2_loans SET balance_due = ?, status = ?, next_payment_at = IF(? <= 0, NULL, DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 1 MONTH)) WHERE id = ? AND citizenid = ? AND status = 'active' AND balance_due >= ?", { remaining, remaining <= 0 and 'paid' or 'active', remaining, id, cid, value })
     if not changed or changed < 1 then
         player.Functions.AddMoney('bank', value, 'bc-banking-loan-repayment-refund')
+        failIdempotency(idempotencyKey, 'loan_update_failed')
         return
     end
     completeIdempotency(idempotencyKey, { success=true })
@@ -741,7 +774,7 @@ exports('RecordBusinessExpense', function(businessId, actorCitizenid, value, cat
     if idemState == 'already_completed' then return true end
     if not idem then return false, idemState end
     local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ? AND balance >= ? AND status = "active"', { n, business.account_id, n })
-    if not changed or changed < 1 then return false, 'insufficient_funds' end
+    if not changed or changed < 1 then failIdempotency(idem, 'insufficient_funds'); return false, 'insufficient_funds' end
     local ok = pcall(function()
         MySQL.insert.await('INSERT INTO bc_banking_v2_business_expenses (business_id, actor_citizenid, amount, category, description) VALUES (?, ?, ?, ?, ?)', { businessId, actorCitizenid, n, tostring(category or 'general'):sub(1,48), tostring(description or 'Business expense'):sub(1,255) })
         MySQL.insert.await([[
@@ -751,6 +784,7 @@ exports('RecordBusinessExpense', function(businessId, actorCitizenid, value, cat
     end)
     if not ok then
         MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ?', { n, business.account_id })
+        failIdempotency(idem, 'recording_failed')
         return false, 'recording_failed'
     end
     completeIdempotency(idem, { success=true })
@@ -945,7 +979,7 @@ RegisterNetEvent('bc-banking:v2:fundAccount', function(data)
     if idemState == 'already_completed' then TriggerClientEvent('bc-banking:client:notify', src, 'This deposit was already processed.', 'success'); return end
     if not idempotencyKey then TriggerClientEvent('bc-banking:client:notify', src, 'Deposit request rejected: ' .. tostring(idemState), 'error'); return end
     local player = playerFor(src)
-    if not player then return end
+    if not player then failIdempotency(idempotencyKey, 'player_unavailable'); return end
     local ok, message = BCBanking.WithPlayerLocks({ cid }, function()
         if (tonumber(player.PlayerData.money[sourceType]) or 0) < value then return false, 'Insufficient funds.' end
         if not player.Functions.RemoveMoney(sourceType, value, 'bc-banking-v2-account-deposit') then return false, 'Money could not be removed.' end
@@ -968,6 +1002,7 @@ RegisterNetEvent('bc-banking:v2:fundAccount', function(data)
         completeIdempotency(idempotencyKey, { success=true })
         return true, 'Account funded.'
     end)
+    if not ok then failIdempotency(idempotencyKey, message or 'deposit_failed') end
     TriggerClientEvent('bc-banking:client:notify', src, message or (ok and 'Account funded.' or 'Deposit failed.'), ok and 'success' or 'error')
     TriggerClientEvent('bc-banking:client:v2:refresh', src)
 end)
@@ -1008,6 +1043,7 @@ RegisterNetEvent('bc-banking:v2:withdrawAccount', function(data)
         completeIdempotency(idempotencyKey, { success=true })
         return true, 'Withdrawal completed.'
     end)
+    if not ok then failIdempotency(idempotencyKey, message or 'withdrawal_failed') end
     TriggerClientEvent('bc-banking:client:notify', src, message or (ok and 'Withdrawal completed.' or 'Withdrawal failed.'), ok and 'success' or 'error')
     TriggerClientEvent('bc-banking:client:v2:refresh', src)
 end)
@@ -1122,12 +1158,14 @@ RegisterNetEvent('bc-banking:v2:repayBusinessLoan', function(data)
     if value > due then value = due end
     local debited = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ? AND balance >= ? AND status = "active"', { value, loan.account_id, value })
     if not debited or debited < 1 then
+        failIdempotency(idempotencyKey, 'insufficient_business_funds')
         TriggerClientEvent('bc-banking:client:notify', src, 'Insufficient business account funds.', 'error'); return
     end
     local remaining = math.max(0, due - value)
     local changed = MySQL.update.await("UPDATE bc_banking_v2_business_loans SET balance_due = ?, status = ? WHERE id = ? AND status = 'active' AND balance_due >= ?", { remaining, remaining <= 0 and 'paid' or 'active', loanId, value })
     if not changed or changed < 1 then
         MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ?', { value, loan.account_id })
+        failIdempotency(idempotencyKey, 'loan_update_failed')
         return
     end
     local balance = MySQL.scalar.await('SELECT balance FROM bc_banking_v2_accounts WHERE id = ?', { loan.account_id })
