@@ -99,6 +99,7 @@ window.addEventListener('message', event => {
     if (message.action === 'open') {
         app.classList.remove('hidden');
         render(message.data);
+        refreshV2();
     }
 
     if (message.action === 'close') app.classList.add('hidden');
@@ -151,4 +152,102 @@ document.addEventListener('keydown', event => {
         nui('close');
         app.classList.add('hidden');
     }
+});
+
+
+// V2 feature panels
+function listRows(target, rows, renderRow, empty) {
+    const el = document.getElementById(target);
+    if (!el) return;
+    el.innerHTML = '';
+    if (!Array.isArray(rows) || !rows.length) {
+        el.textContent = empty;
+        return;
+    }
+    rows.forEach(item => {
+        const row = document.createElement('div');
+        row.className = 'v2-row';
+        row.innerHTML = renderRow(item);
+        el.appendChild(row);
+    });
+}
+
+async function refreshV2() {
+    const [accounts, goals, cards, loans, businesses] = await Promise.all([
+        nui('v2Accounts'), nui('v2Goals'), nui('v2Cards'), nui('v2Loans'), nui('v2Businesses')
+    ]);
+    listRows('v2Accounts', accounts, a =>
+        '<strong>' + escapeHtml(a.display_name) + '</strong><span>' + escapeHtml(a.account_type) + ' • ' +
+        escapeHtml(a.account_number) + '</span><b>' + money(a.balance) + '</b>', 'No additional accounts yet.');
+    listRows('v2Goals', goals, g =>
+        '<strong>' + escapeHtml(g.name) + '</strong><span>#' + escapeHtml(g.id) + ' • ' +
+        escapeHtml(g.status) + '</span><b>' + money(g.current_amount) + ' / ' + money(g.target_amount) + '</b>', 'No savings goals yet.');
+    listRows('v2Cards', cards, c =>
+        '<strong>•••• ' + escapeHtml(c.card_last4) + '</strong><span>' + escapeHtml(c.card_type) + ' • ' +
+        escapeHtml(c.status) + ' • ID ' + escapeHtml(c.id) + '</span><button class="mini-button" data-card-id="' +
+        escapeHtml(c.id) + '" data-frozen="' + (c.status === 'frozen' ? '1' : '0') + '">' +
+        (c.status === 'frozen' ? 'Unfreeze' : 'Freeze') + '</button>', 'No cards issued yet.');
+    listRows('v2Loans', loans, l =>
+        '<strong>Loan #' + escapeHtml(l.id) + '</strong><span>' + escapeHtml(l.status) + ' • ' +
+        escapeHtml(l.term_months) + ' months</span><b>' + money(l.principal) + '</b>', 'No loan applications yet.');
+    listRows('v2Businesses', businesses, b =>
+        '<strong>' + escapeHtml(b.name) + '</strong><span>' + escapeHtml(b.role) + ' • Business #' +
+        escapeHtml(b.id) + '</span>', 'No business accounts yet.');
+}
+
+function bindV2(id, endpoint, values) {
+    const button = document.getElementById(id);
+    if (!button) return;
+    button.addEventListener('click', async () => {
+        await nui(endpoint, values());
+        window.setTimeout(refreshV2, 700);
+    });
+}
+
+bindV2('createAccountButton', 'createV2Account', () => ({
+    type: document.getElementById('newAccountType').value,
+    name: document.getElementById('newAccountName').value.trim()
+}));
+bindV2('v2TransferButton', 'v2Transfer', () => ({
+    accountId: Number(document.getElementById('v2TransferAmount').dataset.accountId || 0),
+    recipient: document.getElementById('v2Recipient').value.trim(),
+    amount: Number(document.getElementById('v2TransferAmount').value),
+    description: document.getElementById('v2TransferDescription').value.trim()
+}));
+bindV2('createGoalButton', 'createGoal', () => ({
+    name: document.getElementById('goalName').value.trim(),
+    target: Number(document.getElementById('goalTarget').value)
+}));
+bindV2('contributeGoalButton', 'contributeGoal', () => ({
+    goalId: Number(document.getElementById('goalId').value),
+    amount: Number(document.getElementById('goalContribution').value)
+}));
+bindV2('issueCardButton', 'issueCard', () => ({
+    accountId: Number(document.getElementById('cardAccountId').value)
+}));
+bindV2('applyLoanButton', 'applyLoan', () => ({
+    amount: Number(document.getElementById('loanAmount').value),
+    months: Number(document.getElementById('loanMonths').value)
+}));
+bindV2('createBusinessButton', 'createBusiness', () => ({
+    name: document.getElementById('businessName').value.trim()
+}));
+bindV2('payrollButton', 'payroll', () => ({
+    businessId: Number(document.getElementById('businessId').value),
+    citizenid: document.getElementById('employeeCitizenId').value.trim(),
+    amount: Number(document.getElementById('employeeAmount').value)
+}));
+
+document.addEventListener('click', async event => {
+    const button = event.target.closest('[data-card-id]');
+    if (!button) return;
+    await nui('setCardStatus', {
+        cardId: Number(button.dataset.cardId),
+        frozen: button.dataset.frozen !== '1'
+    });
+    window.setTimeout(refreshV2, 700);
+});
+
+window.addEventListener('message', event => {
+    if (event.data && event.data.action === 'refreshV2') refreshV2();
 });
