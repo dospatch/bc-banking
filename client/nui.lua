@@ -17,7 +17,8 @@ end)
 RegisterNUICallback('deposit', function(data, cb)
     TriggerServerEvent(
         'bc-banking:server:deposit',
-        tonumber(data.amount)
+        tonumber(data.amount),
+        data.isATM == true
     )
 
     cb('ok')
