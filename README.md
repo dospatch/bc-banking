@@ -844,9 +844,9 @@ Also check the FiveM client console for JavaScript or NUI errors.
 
 # 📋 Version
 
-**Current Version:** `1.0.1`
+**Development Version:** `2.0.0-dev`
 
-**Release Status:** V1.0 development build — requires FiveM runtime testing before production use
+**Release Status:** V2.0.0 development build — not released; implementation and FiveM runtime testing are still in progress. V1.0.1 remains the stable release.
 
 ---
 
