@@ -1,15 +1,21 @@
 -- Discord webhook logging for BC-Banking.
--- Keep webhook URLs in server.cfg; never commit them to the repository.
---
--- Optional general destination (receives every transaction):
--- set bc_banking_webhook "https://discord.com/api/webhooks/ID/TOKEN"
---
--- Optional category destinations:
--- set bc_banking_webhook_deposits "https://discord.com/api/webhooks/ID/TOKEN"
--- set bc_banking_webhook_withdrawals "https://discord.com/api/webhooks/ID/TOKEN"
--- set bc_banking_webhook_transfers "https://discord.com/api/webhooks/ID/TOKEN"
--- set bc_banking_webhook_fees "https://discord.com/api/webhooks/ID/TOKEN"
--- set bc_banking_webhook_other "https://discord.com/api/webhooks/ID/TOKEN"
+-- Real webhook URLs belong in config.private.lua, which is ignored by Git.
+-- Copy config.private.example.lua to config.private.lua and edit the URLs there.
+
+Config.DiscordWebhooks = Config.DiscordWebhooks or {}
+
+local privateConfig = LoadResourceFile(GetCurrentResourceName(), 'config.private.lua')
+if privateConfig and privateConfig ~= '' then
+    local chunk, loadError = load(privateConfig, '@bc-banking/config.private.lua', 't')
+    if chunk then
+        local ok, runError = pcall(chunk)
+        if not ok then
+            print(('[bc-banking] Could not load config.private.lua: %s'):format(tostring(runError)))
+        end
+    else
+        print(('[bc-banking] Could not parse config.private.lua: %s'):format(tostring(loadError)))
+    end
+end
 
 local function clean(value, maxLength)
     local text = tostring(value or 'N/A')
@@ -36,13 +42,14 @@ end
 local function getWebhookTargets(data)
     local targets = {}
     local seen = {}
+    local webhooks = Config.DiscordWebhooks or {}
 
-    local function addConvar(name)
-        local url = GetConvar(name, '')
-        if url == '' then return end
+    local function addWebhook(name)
+        local url = webhooks[name]
+        if url == nil or url == '' then return end
 
         if not isWebhookUrl(url) then
-            print(('[bc-banking] Ignoring invalid Discord webhook URL in convar %s.'):format(name))
+            print(('[bc-banking] Ignoring invalid Discord webhook URL in Config.DiscordWebhooks.%s.'):format(name))
             return
         end
 
@@ -52,11 +59,9 @@ local function getWebhookTargets(data)
         end
     end
 
-    -- The general webhook receives every event when configured.
-    addConvar('bc_banking_webhook')
-
-    -- A category webhook receives only its matching event type.
-    addConvar('bc_banking_webhook_' .. getCategory(data.type or data.transactionType))
+    -- General receives every event; category receives its matching event.
+    addWebhook('general')
+    addWebhook(getCategory(data.type or data.transactionType))
 
     return targets
 end
@@ -81,7 +86,7 @@ function BCBanking.SendDiscordLog(data)
     local targets = getWebhookTargets(data)
     if #targets == 0 then
         if not BCBanking._discordWebhookWarning then
-            print('^3[bc-banking] Discord logs are enabled but no valid webhook is configured. Set bc_banking_webhook or a category-specific webhook in server.cfg.^7')
+            print('^3[bc-banking] Discord logs are enabled but no valid webhook is configured. Copy config.private.example.lua to config.private.lua and add a valid webhook URL.^7')
             BCBanking._discordWebhookWarning = true
         end
         return false
