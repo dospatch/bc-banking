@@ -3,7 +3,7 @@ Config = {}
 Config.Debug = false
 
 Config.BankCommand = 'bank'
-Config.ATMCommand = 'atm'
+Config.CashCommand = 'cash'
 
 Config.Currency = '$'
 
