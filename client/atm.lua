@@ -15,7 +15,7 @@ CreateThread(function()
                 EndTextCommandDisplayHelp(0, false, true, -1)
 
                 if IsControlJustReleased(0, 38) then
-                    BCBanking.OpenBank()
+                    BCBanking.OpenBank(true)
                 end
 
                 break
