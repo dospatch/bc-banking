@@ -722,6 +722,7 @@ RegisterNetEvent('bc-banking:v2:repayLoan', function(data)
     if idemState == 'already_completed' then return end
     if not idempotencyKey then return end
     local due = tonumber(loan.balance_due) or 0
+    if due <= 0 then failIdempotency(idempotencyKey, 'no_outstanding_balance'); return end
     if value > due then value = due end
     local player = playerFor(src)
     if not player or (tonumber(player.PlayerData.money.bank) or 0) < value then
@@ -736,6 +737,18 @@ RegisterNetEvent('bc-banking:v2:repayLoan', function(data)
     if not changed or changed < 1 then
         player.Functions.AddMoney('bank', value, 'bc-banking-loan-repayment-refund')
         failIdempotency(idempotencyKey, 'loan_update_failed')
+        return
+    end
+    local ledgerOk = pcall(function()
+        MySQL.insert.await([[
+            INSERT INTO bc_banking_v2_audit (actor_citizenid, action, target_type, target_id, details)
+            VALUES (?, 'loan.repayment_recorded', 'loan', ?, ?)
+        ]], { cid, tostring(id), json.encode({ amount=value, remaining=remaining }) })
+    end)
+    if not ledgerOk then
+        MySQL.update.await("UPDATE bc_banking_v2_loans SET balance_due = ?, status = 'active', next_payment_at = DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 1 MONTH) WHERE id = ? AND citizenid = ?", { due, id, cid })
+        player.Functions.AddMoney('bank', value, 'bc-banking-loan-repayment-refund')
+        failIdempotency(idempotencyKey, 'repayment_audit_failed')
         return
     end
     completeIdempotency(idempotencyKey, { success=true })
@@ -1239,6 +1252,7 @@ RegisterNetEvent('bc-banking:v2:repayBusinessLoan', function(data)
     if idemState == 'already_completed' then return end
     if not idempotencyKey then return end
     local due = tonumber(loan.balance_due) or 0
+    if due <= 0 then failIdempotency(idempotencyKey, 'no_outstanding_balance'); return end
     if value > due then value = due end
     local debited = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ? AND balance >= ? AND status = "active"', { value, loan.account_id, value })
     if not debited or debited < 1 then
@@ -1253,10 +1267,18 @@ RegisterNetEvent('bc-banking:v2:repayBusinessLoan', function(data)
         return
     end
     local balance = MySQL.scalar.await('SELECT balance FROM bc_banking_v2_accounts WHERE id = ?', { loan.account_id })
-    MySQL.insert.await([[
-        INSERT INTO bc_banking_v2_ledger (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description, metadata)
-        VALUES (?, ?, 'loan_repayment', ?, ?, ?, 'Business loan repayment', ?)
-    ]], { loan.account_id, ('bizloan-%s-%s'):format(loanId, os.time()), value, balance, cid, json.encode({ loan_id=loanId }) })
+    local ledgerOk = pcall(function()
+        MySQL.insert.await([[
+            INSERT INTO bc_banking_v2_ledger (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description, metadata)
+            VALUES (?, ?, 'loan_repayment', ?, ?, ?, 'Business loan repayment', ?)
+        ]], { loan.account_id, ('bizloan-%s-%s-%s'):format(loanId, os.time(), math.random(100000,999999)), value, balance, cid, json.encode({ loan_id=loanId }) })
+    end)
+    if not ledgerOk then
+        MySQL.update.await("UPDATE bc_banking_v2_business_loans SET balance_due = ?, status = 'active' WHERE id = ? AND status IN ('active','paid')", { due, loanId })
+        MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ?', { value, loan.account_id })
+        failIdempotency(idempotencyKey, 'repayment_ledger_failed')
+        return
+    end
     completeIdempotency(idempotencyKey, { success=true })
     logAudit(cid, 'business_loan.repayment', loanId, { amount=value, remaining=remaining })
     TriggerClientEvent('bc-banking:client:notify', src, 'Business loan repayment received.', 'success')
