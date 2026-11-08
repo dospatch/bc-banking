@@ -869,7 +869,7 @@ local function accrueSavingsInterest()
                 (account_id, accrual_date, annual_rate, amount, balance_after)
                 VALUES (?, ?, ?, ?, 0)
             ]], { account.id, date, rate, interest })
-            MySQL.update.await([[
+            local accrued = MySQL.update.await([[
                 UPDATE bc_banking_v2_accounts a
                 JOIN bc_banking_v2_interest_accruals i ON i.account_id = a.id
                 SET a.balance = a.balance + i.amount,
@@ -877,17 +877,23 @@ local function accrueSavingsInterest()
                 WHERE a.id = ? AND i.accrual_date = ? AND i.balance_after = 0
                   AND a.status = 'active'
             ]], { account.id, date })
-            -- INSERT IGNORE + deterministic reference makes this safe to retry
-            -- if the process stopped after the balance update but before logging.
-            MySQL.insert.await([[
-                INSERT IGNORE INTO bc_banking_v2_ledger
-                (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description)
-                SELECT a.id, ?, 'interest', i.amount, i.balance_after, a.owner_citizenid, 'Daily savings interest'
-                FROM bc_banking_v2_accounts a
-                JOIN bc_banking_v2_interest_accruals i ON i.account_id = a.id
-                WHERE a.id = ? AND i.accrual_date = ? AND i.balance_after > 0
-            ]], { ('int-%s-%s'):format(date, account.id), account.id, date })
-            logAudit(account.owner_citizenid, 'savings.interest_accrued', account.id, { amount=interest, date=date })
+            if accrued and accrued > 0 then
+                -- A unique ledger reference prevents duplicate entries if the
+                -- ledger insert is retried after the balance/accrual update.
+                local ledgerOk = pcall(function()
+                    MySQL.insert.await([[
+                        INSERT IGNORE INTO bc_banking_v2_ledger
+                        (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description)
+                        SELECT a.id, ?, 'interest', i.amount, i.balance_after, a.owner_citizenid, 'Daily savings interest'
+                        FROM bc_banking_v2_accounts a
+                        JOIN bc_banking_v2_interest_accruals i ON i.account_id = a.id
+                        WHERE a.id = ? AND i.accrual_date = ? AND i.balance_after > 0
+                    ]], { ('int-%s-%s'):format(date, account.id), account.id, date })
+                end)
+                if ledgerOk then
+                    logAudit(account.owner_citizenid, 'savings.interest_accrued', account.id, { amount=interest, date=date })
+                end
+            end
         end
     end
 end
