@@ -198,40 +198,48 @@ Make sure `qb-core`, `oxmysql`, and `ox_target` are started before BC-Banking. `
 
 # 🔔 Discord Transaction Logs
 
-BC-Banking supports multiple Discord webhooks, so you can send each type of banking activity to its own private Discord channel. You can also configure a general webhook to receive every transaction.
+BC-Banking supports multiple Discord webhooks. You can send all transactions to one general channel, or send each category to its own channel.
 
-Create Discord webhooks in the channels you want to use, then add only the destinations you need to your server.cfg:
+**Webhook URLs are configured in a local private file, not in the public GitHub repository or server.cfg.**
 
-```cfg
-# Optional: receives every banking transaction
-set bc_banking_webhook "https://discord.com/api/webhooks/GENERAL_ID/GENERAL_TOKEN"
+## Setup
 
-# Optional: category-specific channels
-set bc_banking_webhook_deposits "https://discord.com/api/webhooks/DEPOSITS_ID/DEPOSITS_TOKEN"
-set bc_banking_webhook_withdrawals "https://discord.com/api/webhooks/WITHDRAWALS_ID/WITHDRAWALS_TOKEN"
-set bc_banking_webhook_transfers "https://discord.com/api/webhooks/TRANSFERS_ID/TRANSFERS_TOKEN"
-set bc_banking_webhook_fees "https://discord.com/api/webhooks/FEES_ID/FEES_TOKEN"
-set bc_banking_webhook_other "https://discord.com/api/webhooks/OTHER_ID/OTHER_TOKEN"
-```
+1. Open the BC-Banking resource folder.
+2. Make a copy of `config.private.example.lua`.
+3. Rename the copy to `config.private.lua`.
+4. Open `config.private.lua` and paste your own Discord webhook URLs into the matching fields.
+5. Keep `config.private.lua` on your server and never upload it to GitHub.
+6. Make sure `Config.DiscordLogs = true` in `config.lua`.
+7. Restart `bc-banking`.
 
-| Convar | Receives |
-| --- | --- |
-| `bc_banking_webhook` | Every transaction (general log) |
-| `bc_banking_webhook_deposits` | Deposits |
-| `bc_banking_webhook_withdrawals` | Withdrawals |
-| `bc_banking_webhook_transfers` | Incoming and outgoing transfers |
-| `bc_banking_webhook_fees` | Transfer fees |
-| `bc_banking_webhook_other` | Other transaction types |
-
-You do not need to configure all of them. If both the general webhook and a category webhook are configured, matching transactions are sent to both channels. If only a category webhook is configured, that category is sent there. Duplicate URLs are automatically sent only once per event.
-
-Keep Discord logging enabled in config.lua:
+Example private file:
 
 ```lua
-Config.DiscordLogs = true
+Config.DiscordWebhooks = {
+    general = '',
+
+    deposits = '',
+    withdrawals = '',
+    transfers = '',
+    fees = '',
+    other = ''
+}
 ```
 
-Set it to `false` to disable Discord transaction logs. Restart BC-Banking after changing server.cfg. Webhook URLs are read server-side through GetConvar, are not placed in config.lua or client files, and must never be committed to GitHub. Keep destination channels private and limit access to trusted staff.
+| Setting | Receives |
+| --- | --- |
+| `general` | Every banking transaction |
+| `deposits` | Deposits |
+| `withdrawals` | Withdrawals |
+| `transfers` | Incoming and outgoing transfers |
+| `fees` | Transfer fees |
+| `other` | Other transaction types |
+
+You do not need to fill in every field. If both `general` and a category webhook are configured, matching transactions go to both channels. If only a category webhook is configured, only that category goes to its channel. Duplicate URLs are sent only once per event.
+
+Each server owner can change these URLs to their own Discord webhooks. The public `config.lua` contains the editable settings, while the real webhook secrets stay in the local `config.private.lua` file. The repository's `.gitignore` excludes that private file from Git commits.
+
+Set `Config.DiscordLogs = false` in `config.lua` to disable Discord logging.
 
 Logs include the character name when online, citizen ID, amount, transaction description, related account, and transaction ID.
 
