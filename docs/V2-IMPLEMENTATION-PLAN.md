@@ -1,6 +1,6 @@
 # BC-Banking V2.0.0 — Implementation Plan
 
-Status: V2 feature implementation in progress on `feature/bc-banking-v2`; not production-ready or released.
+Status: V2 feature implementation in progress on `feature/bc-banking-v2`; not production-ready or released. Current additive schema version: 4.
 Stable V1 branch: `main` (do not modify during V2 development).
 
 ## Repository baseline inspected
