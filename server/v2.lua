@@ -543,47 +543,89 @@ exports('GetV2AccountBalance', function(accountId, citizenid)
     return perms.view == true and tonumber(access.balance) or nil
 end)
 
-exports('DepositToV2Account', function(accountId, citizenid, value, description)
+exports('DepositToV2Account', function(accountId, citizenid, value, description, idempotencyKey)
+    if not BCBanking.V2Ready then return false, 'v2_not_ready' end
     local n = amount(value, tonumber(Config.MaxDeposit) or 1000000)
     if not n then return false, 'invalid_amount' end
     local access = member(tonumber(accountId), citizenid)
     if not access then return false, 'not_authorized' end
     local perms = type(access.permissions) == 'table' and access.permissions or json.decode(access.permissions or '{}') or {}
     if not perms.deposit then return false, 'not_authorized' end
-    local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ? AND status = "active"', { n, accountId })
-    if not changed or changed < 1 then return false, 'database_error' end
-    local ok, err = pcall(function()
-        MySQL.insert.await([[INSERT INTO bc_banking_v2_ledger
-            (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description)
-            SELECT id, ?, 'deposit', ?, balance, ?, ? FROM bc_banking_v2_accounts WHERE id = ?]],
-            { ('dep-%s-%s'):format(os.time(), math.random(100000,999999)), n, citizenid, tostring(description or 'External deposit'):sub(1,255), accountId })
+
+    local idem, idemState = claimIdempotency(citizenid, 'api.account.deposit', {
+        idempotencyKey=idempotencyKey, accountId=tonumber(accountId), amount=n, description=description
+    })
+    if idemState == 'already_completed' then return true end
+    if not idem then return false, idemState end
+
+    local ref = ('api-dep-%s-%s'):format(os.time(), math.random(100000,999999))
+    local ok, committed = pcall(function()
+        return MySQL.transaction.await({
+            {
+                query = "UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ? AND status = 'active'",
+                values = { n, tonumber(accountId) }
+            },
+            {
+                query = [[
+                    INSERT INTO bc_banking_v2_ledger
+                    (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description)
+                    SELECT id, ?, 'deposit', ?, balance, ?, ?
+                    FROM bc_banking_v2_accounts WHERE id = ? AND status = 'active'
+                ]],
+                values = { ref, n, citizenid, tostring(description or 'External deposit'):sub(1,255), tonumber(accountId) }
+            }
+        })
     end)
-    if not ok then
-        MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ?', { n, accountId })
-        return false, 'ledger_error'
+    if not ok or committed ~= true then
+        failIdempotency(idem, 'database_transaction_failed')
+        return false, 'database_error'
     end
+    completeIdempotency(idem, { success=true, reference=ref })
     return true
 end)
 
-exports('WithdrawFromV2Account', function(accountId, citizenid, value, description)
+exports('WithdrawFromV2Account', function(accountId, citizenid, value, description, idempotencyKey)
+    if not BCBanking.V2Ready then return false, 'v2_not_ready' end
     local n = amount(value, tonumber(Config.MaxWithdrawal) or 1000000)
     if not n then return false, 'invalid_amount' end
     local access = member(tonumber(accountId), citizenid)
     if not access then return false, 'not_authorized' end
     local perms = type(access.permissions) == 'table' and access.permissions or json.decode(access.permissions or '{}') or {}
     if not perms.withdraw then return false, 'not_authorized' end
-    local changed = MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance - ? WHERE id = ? AND status = "active" AND balance >= ?', { n, accountId, n })
-    if not changed or changed < 1 then return false, 'insufficient_funds' end
-    local ok, err = pcall(function()
-        MySQL.insert.await([[INSERT INTO bc_banking_v2_ledger
-            (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description)
-            SELECT id, ?, 'withdrawal', ?, balance, ?, ? FROM bc_banking_v2_accounts WHERE id = ?]],
-            { ('wd-%s-%s'):format(os.time(), math.random(100000,999999)), n, citizenid, tostring(description or 'External withdrawal'):sub(1,255), accountId })
+
+    local idem, idemState = claimIdempotency(citizenid, 'api.account.withdraw', {
+        idempotencyKey=idempotencyKey, accountId=tonumber(accountId), amount=n, description=description
+    })
+    if idemState == 'already_completed' then return true end
+    if not idem then return false, idemState end
+
+    local ref = ('api-wd-%s-%s'):format(os.time(), math.random(100000,999999))
+    local ok, committed = pcall(function()
+        return MySQL.transaction.await({
+            {
+                query = [[
+                    UPDATE bc_banking_v2_accounts
+                    SET balance = balance - ?
+                    WHERE id = ? AND status = 'active' AND balance >= ?
+                ]],
+                values = { n, tonumber(accountId), n }
+            },
+            {
+                query = [[
+                    INSERT INTO bc_banking_v2_ledger
+                    (account_id, transaction_ref, entry_type, amount, balance_after, actor_citizenid, description)
+                    SELECT id, ?, 'withdrawal', ?, balance, ?, ?
+                    FROM bc_banking_v2_accounts WHERE id = ? AND status = 'active'
+                ]],
+                values = { ref, -n, citizenid, tostring(description or 'External withdrawal'):sub(1,255), tonumber(accountId) }
+            }
+        })
     end)
-    if not ok then
-        MySQL.update.await('UPDATE bc_banking_v2_accounts SET balance = balance + ? WHERE id = ?', { n, accountId })
-        return false, 'ledger_error'
+    if not ok or committed ~= true then
+        failIdempotency(idem, 'database_transaction_failed_or_insufficient_funds')
+        return false, 'database_error_or_insufficient_funds'
     end
+    completeIdempotency(idem, { success=true, reference=ref })
     return true
 end)
 
