@@ -26,7 +26,7 @@ function money(value) {
 }
 
 async function nui(endpoint, data = {}) {
-    const idempotentEndpoints = ['v2Transfer', 'fundV2Account', 'withdrawV2Account'];
+    const idempotentEndpoints = ['v2Transfer', 'fundV2Account', 'withdrawV2Account', 'contributeGoal', 'repayLoan', 'payroll', 'repayBusinessLoan'];
     if (idempotentEndpoints.includes(endpoint)) {
         const key = window.crypto && typeof window.crypto.randomUUID === 'function'
             ? window.crypto.randomUUID()
