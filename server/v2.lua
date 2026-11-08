@@ -139,17 +139,42 @@ end)
 RegisterNetEvent('bc-banking:v2:createAccount', function(data)
     local src, cid = source, cidFor(source)
     if not cid or type(data) ~= 'table' then return end
+
     local kind = tostring(data.type or 'checking')
     local allowed = { checking=true, savings=true }
-    if not allowed[kind] then TriggerClientEvent('bc-banking:client:notify', src, 'Invalid account type.', 'error'); return end
-    local count = tonumber(MySQL.scalar.await([[
-        SELECT COUNT(*) FROM bc_banking_v2_account_members m JOIN bc_banking_v2_accounts a ON a.id = m.account_id WHERE m.citizenid = ? AND m.status = 'active' AND a.account_type IN ('checking','savings')
-    ]], { cid }) or 0)
-    local cap = tonumber(Config.V2 and Config.V2.MaxPersonalAccounts) or 5
-    if count >= cap then TriggerClientEvent('bc-banking:client:notify', src, 'You have reached your account limit.', 'error'); return end
-    local name = tostring(data.name or (kind == 'savings' and 'Savings Account' or 'Checking Account')):sub(1, 80)
-    local account, err = createAccount(cid, kind, name, 0)
-    if not account then TriggerClientEvent('bc-banking:client:notify', src, err, 'error'); return end
+    if not allowed[kind] then
+        TriggerClientEvent('bc-banking:client:notify', src, 'Invalid account type.', 'error')
+        return
+    end
+
+    local name = tostring(data.name or (kind == 'savings' and 'Savings Account' or 'Checking Account'))
+        :gsub('[%c]', ''):sub(1, 80)
+
+    -- Serialize the account-limit check and insert per character so two rapid
+    -- create requests cannot both pass the same limit check.
+    local account, err = BCBanking.WithPlayerLocks({ cid }, function()
+        local count = tonumber(MySQL.scalar.await([[
+            SELECT COUNT(*)
+            FROM bc_banking_v2_account_members m
+            JOIN bc_banking_v2_accounts a ON a.id = m.account_id
+            WHERE m.citizenid = ? AND m.status = 'active'
+              AND a.status = 'active'
+              AND a.account_type IN ('checking','savings')
+        ]], { cid }) or 0)
+
+        local cap = math.max(1, math.min(20, tonumber(Config.V2 and Config.V2.MaxPersonalAccounts) or 5))
+        if count >= cap then
+            return nil, 'You have reached your account limit.'
+        end
+
+        return createAccount(cid, kind, name, 0)
+    end)
+
+    if not account then
+        TriggerClientEvent('bc-banking:client:notify', src, err or 'Account creation failed.', 'error')
+        return
+    end
+
     logAudit(cid, 'account.created', account.id, { type=kind })
     TriggerClientEvent('bc-banking:client:notify', src, 'Account created: ' .. account.account_number, 'success')
     TriggerClientEvent('bc-banking:client:v2:refresh', src)
