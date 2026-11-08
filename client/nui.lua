@@ -63,3 +63,41 @@ RegisterKeyMapping(
     'keyboard',
     'ESC'
 )
+
+
+-- V2 NUI bridge. All money and permission checks remain server-authoritative.
+local function v2Callback(name, data, cb)
+    QBCore.Functions.TriggerCallback('bc-banking:v2:' .. name, function(result)
+        cb(result or {})
+    end, data)
+end
+
+RegisterNUICallback('v2Accounts', function(_, cb) v2Callback('getAccounts', nil, cb) end)
+RegisterNUICallback('v2Goals', function(_, cb) v2Callback('getGoals', nil, cb) end)
+RegisterNUICallback('v2Cards', function(_, cb) v2Callback('getCards', nil, cb) end)
+RegisterNUICallback('v2Loans', function(_, cb) v2Callback('getLoans', nil, cb) end)
+RegisterNUICallback('v2Businesses', function(_, cb) v2Callback('getBusinesses', nil, cb) end)
+
+local v2Events = {
+    createV2Account = 'bc-banking:v2:createAccount',
+    v2Transfer = 'bc-banking:v2:transfer',
+    createGoal = 'bc-banking:v2:createGoal',
+    contributeGoal = 'bc-banking:v2:contributeGoal',
+    issueCard = 'bc-banking:v2:issueCard',
+    setCardStatus = 'bc-banking:v2:setCardStatus',
+    applyLoan = 'bc-banking:v2:applyLoan',
+    createBusiness = 'bc-banking:v2:createBusiness',
+    addBusinessEmployee = 'bc-banking:v2:addBusinessEmployee',
+    payroll = 'bc-banking:v2:payroll'
+}
+
+for callbackName, eventName in pairs(v2Events) do
+    RegisterNUICallback(callbackName, function(data, cb)
+        TriggerServerEvent(eventName, data or {})
+        cb({ submitted = true })
+    end)
+end
+
+RegisterNetEvent('bc-banking:client:v2:refresh', function()
+    SendNUIMessage({ action = 'refreshV2' })
+end)
